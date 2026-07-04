@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model DeviceConfig {
+  id          String   @id @default(cuid())
+  model       String   @unique // TL.0009, TL.0250, TL.0320, TL.0400
+  displayName String
+  tiltIp      String
+  tiltPort    Int
+  panIp       String
+  panPort     Int
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  presets     Preset[]
+}
+
+model Preset {
+  id          String       @id @default(cuid())
+  name        String
+  slot        Int          // 1-16
+  azimuth     Float
+  elevation   Float
+  speed       Int          @default(5)
+  deviceId    String
+  device      DeviceConfig @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([deviceId, slot])
+}
+
+model CommandLog {
+  id        String   @id @default(cuid())
+  deviceId  String
+  command   String
+  direction String?
+  payload   String?
+  response  String?
+  status    String   @default("pending") // pending, success, error, timeout
+  duration  Int?
+  createdAt DateTime @default(now())
+}
