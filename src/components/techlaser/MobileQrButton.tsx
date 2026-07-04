@@ -60,28 +60,28 @@ export default function MobileQrButton() {
       </PopoverTrigger>
 
       <PopoverContent
-        className="w-72 p-4 space-y-3"
+        className="w-64 p-3 space-y-2 overflow-visible"
         side="bottom"
         align="end"
         sideOffset={8}
       >
         {/* Header */}
         <div className="flex items-center gap-2">
-          <Smartphone className="w-4 h-4 text-primary shrink-0" />
-          <span className="text-sm font-semibold">Управление с телефона</span>
+          <Smartphone className="w-3.5 h-3.5 text-primary shrink-0" />
+          <span className="text-xs font-semibold">Управление с телефона</span>
         </div>
 
         {/* QR Code */}
         <div className="flex justify-center">
           {!mobileUrl ? (
-            <div className="w-[180px] h-[180px] rounded-xl bg-secondary flex items-center justify-center">
+            <div className="w-[160px] h-[160px] rounded-lg bg-secondary flex items-center justify-center">
               <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
             </div>
           ) : (
-            <div className="p-2.5 bg-white rounded-xl shadow-md">
+            <div className="p-2 bg-white rounded-lg">
               <QRCodeSVG
                 value={mobileUrl}
-                size={180}
+                size={160}
                 level="M"
                 bgColor="#ffffff"
                 fgColor="#0a0a0a"
@@ -92,26 +92,26 @@ export default function MobileQrButton() {
         </div>
 
         {/* Instructions */}
-        <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
+        <p className="text-[10px] text-muted-foreground text-center leading-relaxed">
           Наведите камеру на QR-код — откроется страница с D-Pad
         </p>
 
         {/* URL + Copy */}
         {mobileUrl && (
-          <div className="flex items-center gap-1.5 bg-secondary/80 rounded-md px-2 py-1">
-            <code className="flex-1 text-[10px] font-mono text-muted-foreground truncate">
+          <div className="flex items-center gap-1 bg-secondary/80 rounded-md px-2 py-1">
+            <code className="flex-1 text-[9px] font-mono text-muted-foreground truncate">
               {mobileUrl}
             </code>
             <Button
               size="sm"
               variant="ghost"
-              className="h-6 w-6 p-0 shrink-0"
+              className="h-5 w-5 p-0 shrink-0"
               onClick={handleCopy}
             >
               {copied ? (
-                <Check className="w-3 h-3 text-emerald-400" />
+                <Check className="w-2.5 h-2.5 text-emerald-400" />
               ) : (
-                <Copy className="w-3 h-3" />
+                <Copy className="w-2.5 h-2.5" />
               )}
             </Button>
           </div>

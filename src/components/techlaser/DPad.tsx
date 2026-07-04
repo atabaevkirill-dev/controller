@@ -5,14 +5,14 @@ import { useDeviceStore } from '@/store/device-store';
 import { PROTOCOL_COMMANDS, type Direction } from '@/lib/device-types';
 
 const DIRECTIONS: { key: Direction; label: string; gridPos: string; icon: React.ReactNode }[] = [
-  { key: 'up', label: 'Вверх', gridPos: 'col-start-2 row-start-1', icon: <ArrowUp className="w-5 h-5" /> },
-  { key: 'up-right', label: 'Вверх-вправо', gridPos: 'col-start-3 row-start-1', icon: <ArrowUp className="w-5 h-5 rotate-45" /> },
-  { key: 'right', label: 'Вправо', gridPos: 'col-start-3 row-start-2', icon: <ArrowRight className="w-5 h-5" /> },
-  { key: 'down-right', label: 'Вниз-вправо', gridPos: 'col-start-3 row-start-3', icon: <ArrowDown className="w-5 h-5 -rotate-45" /> },
-  { key: 'down', label: 'Вниз', gridPos: 'col-start-2 row-start-3', icon: <ArrowDown className="w-5 h-5" /> },
-  { key: 'down-left', label: 'Вниз-влево', gridPos: 'col-start-1 row-start-3', icon: <ArrowDown className="w-5 h-5 rotate-45" /> },
-  { key: 'left', label: 'Влево', gridPos: 'col-start-1 row-start-2', icon: <ArrowLeft className="w-5 h-5" /> },
-  { key: 'up-left', label: 'Вверх-влево', gridPos: 'col-start-1 row-start-1', icon: <ArrowUp className="w-5 h-5 -rotate-45" /> },
+  { key: 'up', label: 'Вверх', gridPos: 'col-start-2 row-start-1', icon: <ArrowUp className="w-6 h-6" /> },
+  { key: 'up-right', label: 'Вверх-вправо', gridPos: 'col-start-3 row-start-1', icon: <ArrowUp className="w-6 h-6 rotate-45" /> },
+  { key: 'right', label: 'Вправо', gridPos: 'col-start-3 row-start-2', icon: <ArrowRight className="w-6 h-6" /> },
+  { key: 'down-right', label: 'Вниз-вправо', gridPos: 'col-start-3 row-start-3', icon: <ArrowDown className="w-6 h-6 -rotate-45" /> },
+  { key: 'down', label: 'Вниз', gridPos: 'col-start-2 row-start-3', icon: <ArrowDown className="w-6 h-6" /> },
+  { key: 'down-left', label: 'Вниз-влево', gridPos: 'col-start-1 row-start-3', icon: <ArrowDown className="w-6 h-6 rotate-45" /> },
+  { key: 'left', label: 'Влево', gridPos: 'col-start-1 row-start-2', icon: <ArrowLeft className="w-6 h-6" /> },
+  { key: 'up-left', label: 'Вверх-влево', gridPos: 'col-start-1 row-start-1', icon: <ArrowUp className="w-6 h-6 -rotate-45" /> },
 ];
 
 const DIR_TO_COMMAND: Record<string, string> = {
@@ -50,10 +50,10 @@ export default function DPad() {
   };
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex flex-col items-center gap-3 w-full">
       <div
-        className="grid grid-cols-3 grid-rows-3 gap-2 relative w-full"
-        style={{ maxWidth: '280px', height: 'clamp(220px, 25vw, 280px)' }}
+        className="grid grid-cols-3 grid-rows-3 gap-2.5 relative w-full"
+        style={{ maxWidth: '340px', height: 'clamp(260px, 30vw, 340px)' }}
       >
         {/* Connection ring glow behind the DPad */}
         {isConnected && (
@@ -106,7 +106,7 @@ export default function DPad() {
           onMouseDown={handleStop}
           onTouchStart={(e) => { e.preventDefault(); handleStop(); }}
         >
-          <Square className="w-6 h-6" fill="currentColor" />
+          <Square className="w-7 h-7" fill="currentColor" />
         </button>
       </div>
 

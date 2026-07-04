@@ -1,4 +1,4 @@
-// TechLaser Device Types & Protocol Definitions
+// Device Types & Protocol Definitions
 
 export type DeviceModel = 'TL.0009' | 'TL.0250' | 'TL.0320' | 'TL.0400';
 

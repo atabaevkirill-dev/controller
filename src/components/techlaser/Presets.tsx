@@ -144,7 +144,7 @@ export default function Presets() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-8 gap-1">
+        <div className="grid grid-cols-8 gap-0.5">
           {slots.map((preset, idx) => (
             <div
               key={idx}
@@ -156,7 +156,7 @@ export default function Presets() {
             >
               <button
                 className={`
-                  w-full rounded border border-border py-1.5 px-0.5
+                  w-full rounded-sm border border-border/60 py-0.5
                   flex flex-col items-center justify-center gap-0
                   transition-colors hover:border-primary/50 hover:bg-secondary/50
                   ${preset ? 'bg-secondary/30' : 'bg-secondary/10'}
@@ -164,21 +164,21 @@ export default function Presets() {
                 onClick={() => recallPreset(idx)}
                 title={preset ? `${preset.name} (${preset.azimuth.toFixed(0)}°/${preset.elevation.toFixed(0)}°)\nДолгое нажатие — сохранить\nПКМ — очистить` : `Слот ${idx + 1} — пустой`}
               >
-                <span className="text-[9px] text-muted-foreground font-mono leading-none">{idx + 1}</span>
+                <span className="text-[8px] text-muted-foreground font-mono leading-none">{idx + 1}</span>
                 {editingSlot === idx ? (
                   <Input
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
                     onBlur={saveName}
                     onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingSlot(null); }}
-                    className="h-4 text-[8px] p-0 px-0.5 font-mono text-center bg-input border-primary mt-0.5"
+                    className="h-3.5 text-[7px] p-0 px-0.5 font-mono text-center bg-input border-primary mt-0.5"
                     autoFocus
                     onClick={(e) => e.stopPropagation()}
                     onPointerDown={(e) => e.stopPropagation()}
                   />
                 ) : (
                   <span
-                    className="text-[9px] font-medium leading-tight text-center truncate w-full cursor-text mt-0.5"
+                    className="text-[7px] font-medium leading-tight text-center truncate w-full cursor-text mt-0.5 max-w-[42px]"
                     onClick={(e) => { e.stopPropagation(); startEdit(idx); }}
                     title="Редактировать имя"
                   >
@@ -190,26 +190,26 @@ export default function Presets() {
               {/* Action buttons overlay */}
               <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5 z-10">
                 <button
-                  className="w-4 h-4 rounded-sm bg-primary text-primary-foreground flex items-center justify-center"
+                  className="w-3.5 h-3.5 rounded-sm bg-primary text-primary-foreground flex items-center justify-center"
                   onClick={(e) => { e.stopPropagation(); savePreset(idx); }}
                   title="Сохранить текущую позицию"
                 >
-                  <Save className="w-2.5 h-2.5" />
+                  <Save className="w-2 h-2" />
                 </button>
                 {preset && (
                   <button
-                    className="w-4 h-4 rounded-sm bg-destructive text-destructive-foreground flex items-center justify-center"
+                    className="w-3.5 h-3.5 rounded-sm bg-destructive text-destructive-foreground flex items-center justify-center"
                     onClick={(e) => { e.stopPropagation(); clearPreset(idx); }}
                     title="Очистить слот"
                   >
-                    <Trash2 className="w-2.5 h-2.5" />
+                    <Trash2 className="w-2 h-2" />
                   </button>
                 )}
               </div>
             </div>
           ))}
         </div>
-        <p className="text-[9px] text-muted-foreground mt-1.5 text-center">
+        <p className="text-[8px] text-muted-foreground mt-1 text-center">
           Клик — вызвать · Удержание — сохранить · ПКМ — очистить
         </p>
       </CardContent>

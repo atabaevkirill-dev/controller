@@ -220,3 +220,24 @@ Stage Summary:
 - Self-diagnostics in extended settings
 - Visual connection feedback throughout the app
 - Lint passes clean
+---
+Task ID: 1
+Agent: Main
+Task: Fix UI issues - presets too large, DPad too small, QR half-display, remove TechLaser, hide scrollbars
+
+Work Log:
+- Reduced preset button sizes: padding py-1.5→py-0.5, gap-1→gap-0.5, text 9px→8px, name text 9px→7px, overlay icons 4px→3.5px, border rounded→rounded-sm
+- Enlarged DPad: maxWidth 280px→340px, height clamp 220-280→260-340, gap-2→gap-2.5, icons w-5→w-6, STOP icon w-6→w-7
+- Fixed DPad width collapse: added w-full to outer flex container
+- Increased left column grid from 320px to 380px
+- Fixed QR code: reduced size to 160px, compacted popover (w-64, p-3), removed zoom animation from PopoverContent, added overflow-visible
+- Removed TechLaser from page.tsx (renamed TechLaserController→SaaSController) and device-types.ts (comment)
+- Scrollbars already hidden in globals.css, marquee already removed
+- Verified all changes via agent-browser: DPad 330x340, QR 160x160 fully inside popover, presets 8px text, no console errors
+
+Stage Summary:
+- All 3 main UI issues fixed: compact presets, larger DPad, working QR
+- TechLaser branding completely removed from source
+- Clean lint, no runtime errors
+- Mobile and desktop layouts verified
+

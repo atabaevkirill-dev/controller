@@ -34,7 +34,7 @@ async function sendCommand(device: string, command: string, value?: string) {
   }
 }
 
-export default function TechLaserController() {
+export default function SaaSController() {
   const {
     activeDevice,
     connectionStatus,
@@ -264,7 +264,7 @@ export default function TechLaserController() {
             </MobileExpandableSection>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
             {/* Left Column — Controls */}
             <div className="space-y-4">
               <Card className="bg-card border-border">
