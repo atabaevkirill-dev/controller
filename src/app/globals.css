@@ -186,3 +186,33 @@
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/* Custom range input for mobile remote */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 4px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: oklch(0.72 0.19 163);
+  border: 3px solid oklch(0.13 0.005 260);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+  cursor: pointer;
+  margin-top: -10px;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: oklch(0.72 0.19 163);
+  border: 3px solid oklch(0.13 0.005 260);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+  cursor: pointer;
+}

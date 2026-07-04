@@ -77,7 +77,7 @@ export default function RotaryEncoder({
       const delta = -deltaY * sensitivity * step;
       onChange(clamp(value + delta));
     },
-    [value, step, min, max, decimals, onChange, size],
+    [value, step, min, max, decimals, onChange, size, clamp],
   );
 
   const handlePointerDown = useCallback(

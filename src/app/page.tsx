@@ -14,6 +14,7 @@ import Presets from '@/components/techlaser/Presets';
 import Diagnostics from '@/components/techlaser/Diagnostics';
 import JoystickStatus from '@/components/techlaser/JoystickStatus';
 import ExtendedSettings from '@/components/techlaser/ExtendedSettings';
+import MobileQrButton from '@/components/techlaser/MobileQrButton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
@@ -153,6 +154,7 @@ export default function TechLaserController() {
 
           <div className="flex items-center gap-2 sm:gap-3">
             <DeviceSelector />
+            <MobileQrButton />
             {!isMobile && (
               <Button
                 size="sm"
