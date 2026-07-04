@@ -368,7 +368,7 @@ const MOBILE_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>TechLaser Mobile Control</title>
+<title>SaaS Controller — Mobile</title>
 <script src="/socket.io/socket.io.js"><\/script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -755,7 +755,7 @@ const MOBILE_HTML = `<!DOCTYPE html>
 
   <!-- Header -->
   <div class="header">
-    <h1>TechLaser</h1>
+    <h1>SaaS Ctrl</h1>
     <div class="status-badge">
       <div class="status-dot" id="statusDot"></div>
       <span id="statusText">Disconnected</span>
@@ -1632,7 +1632,7 @@ io.on('connection', (socket) => {
 // ─── Start Server ────────────────────────────────────────────────────────────
 
 httpServer.listen(PORT, () => {
-  console.log(`[Bridge] TechLaser Device Bridge running on port ${PORT}`);
+  console.log(`[Bridge] Device Bridge running on port ${PORT}`);
   console.log(`[Bridge] HTTP REST: http://localhost:${PORT}/health, http://localhost:${PORT}/command`);
   console.log(`[Bridge] Socket.IO: ws://localhost:${PORT}/socket.io`);
   console.log(`[Bridge] Mobile UI:  http://localhost:${PORT}/`);

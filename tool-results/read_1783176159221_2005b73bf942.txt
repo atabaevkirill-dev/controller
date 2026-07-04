@@ -1,0 +1,1661 @@
+     1→import express from 'express';
+     2→import { createServer } from 'http';
+     3→import { Server } from 'socket.io';
+     4→import { Socket as TcpSocket, createConnection } from 'net';
+     5→
+     6→// ─── Constants ───────────────────────────────────────────────────────────────
+     7→
+     8→const PORT = 3002;
+     9→const COMMAND_TIMEOUT = 3000;
+    10→const CONNECTION_TIMEOUT = 5000;
+    11→
+    12→const VALID_COMMANDS = new Set([
+    13→  'MU', 'MD', 'ML', 'MR', 'MUL', 'MUR', 'MDL', 'MDR', 'STP',
+    14→  'SPD', 'POS', 'GOTO', 'HOM', 'PNG', 'STA', 'RST',
+    15→  'SPRS', 'RPRS', 'SSWG', 'ESWG',
+    16→  'SET_ACC', 'SET_DEC', 'SET_DZ', 'SET_LIM', 'SET_APT',
+    17→  'SET_BC', 'SET_SMODE', 'SET_TW', 'SET_TS', 'SET_EREC',
+    18→  'SET_PRI', 'SET_VF', 'SET_DAMP', 'SET_MCUR', 'SET_SYNC',
+    19→  // TL.0400 specific
+    20→  'SET_ACC_T', 'SET_ACC_P', 'SET_DEC_T', 'SET_DEC_P',
+    21→  'SET_LIM_T', 'SET_LIM_P', 'SET_SMODE_T', 'SET_SMODE_P',
+    22→  // Self-diagnostics
+    23→  'DIAG', 'VER', 'SN', 'HWINFO', 'ERRLOG', 'CLRERR',
+    24→]);
+    25→
+    26→// ─── Types ───────────────────────────────────────────────────────────────────
+    27→
+    28→interface DeviceConnection {
+    29→  model: string;
+    30→  tiltSocket: TcpSocket | null;
+    31→  panSocket: TcpSocket | null;
+    32→  tiltIp: string;
+    33→  tiltPort: number;
+    34→  panIp: string;
+    35→  panPort: number;
+    36→  connected: boolean;
+    37→  connectedAt: number | null;
+    38→  lastError: string | null;
+    39→  speed: number;
+    40→  azimuth: number;
+    41→  elevation: number;
+    42→  status: string;
+    43→}
+    44→
+    45→// ─── State ───────────────────────────────────────────────────────────────────
+    46→
+    47→const devices = new Map<string, DeviceConnection>();
+    48→const startTime = Date.now();
+    49→
+    50→function getDevice(model: string): DeviceConnection | undefined {
+    51→  return devices.get(model);
+    52→}
+    53→
+    54→function getOrCreateDevice(model: string): DeviceConnection {
+    55→  let device = devices.get(model);
+    56→  if (!device) {
+    57→    const isDual = model === 'TL.0400';
+    58→    device = {
+    59→      model,
+    60→      tiltSocket: null,
+    61→      panSocket: null,
+    62→      tiltIp: isDual ? '192.168.1.115' : '192.168.1.115',
+    63→      tiltPort: 9760,
+    64→      panIp: isDual ? '192.168.1.116' : '192.168.1.115',
+    65→      panPort: 9760,
+    66→      connected: false,
+    67→      connectedAt: null,
+    68→      lastError: null,
+    69→      speed: 5,
+    70→      azimuth: 0,
+    71→      elevation: 0,
+    72→      status: 'disconnected',
+    73→    };
+    74→    devices.set(model, device);
+    75→  }
+    76→  return device;
+    77→}
+    78→
+    79→// ─── TCP Manager ─────────────────────────────────────────────────────────────
+    80→
+    81→function connectTcpSocket(ip: string, port: number): Promise<TcpSocket> {
+    82→  return new Promise((resolve, reject) => {
+    83→    const socket = createConnection({ host: ip, port, timeout: CONNECTION_TIMEOUT });
+    84→
+    85→    const timer = setTimeout(() => {
+    86→      socket.destroy();
+    87→      reject(new Error(`TCP connection timeout to ${ip}:${port} (${CONNECTION_TIMEOUT}ms)`));
+    88→    }, CONNECTION_TIMEOUT);
+    89→
+    90→    socket.on('connect', () => {
+    91→      clearTimeout(timer);
+    92→      // Clear the connection timeout so the socket stays open
+    93→      socket.setTimeout(0);
+    94→      console.log(`[TCP] Connected to ${ip}:${port}`);
+    95→      resolve(socket);
+    96→    });
+    97→
+    98→    socket.on('error', (err) => {
+    99→      clearTimeout(timer);
+   100→      console.error(`[TCP] Error connecting to ${ip}:${port}: ${err.message}`);
+   101→      reject(new Error(`TCP connect error to ${ip}:${port}: ${err.message}`));
+   102→    });
+   103→
+   104→    socket.on('timeout', () => {
+   105→      // Idle timeout on persistent socket — just log it
+   106→      console.warn(`[TCP] Idle timeout on ${ip}:${port}`);
+   107→    });
+   108→
+   109→    socket.on('close', (hadError) => {
+   110→      console.log(`[TCP] Connection closed to ${ip}:${port} (error: ${hadError})`);
+   111→    });
+   112→  });
+   113→}
+   114→
+   115→function sendTcpCommand(socket: TcpSocket, rawCommand: string): Promise<string> {
+   116→  return new Promise((resolve, reject) => {
+   117→    const fullCommand = `${rawCommand}\r\n`;
+   118→    console.log(`[TCP] TX → ${rawCommand.replace(/\r?\n/g, '\\r\\n')}`);
+   119→
+   120→    const timer = setTimeout(() => {
+   121→      // Remove listener to prevent leaks
+   122→      socket.removeListener('data', onData);
+   123→      socket.removeListener('error', onError);
+   124→      socket.removeListener('close', onClose);
+   125→      reject(new Error(`Command timeout after ${COMMAND_TIMEOUT}ms: ${rawCommand}`));
+   126→    }, COMMAND_TIMEOUT);
+   127→
+   128→    function onData(data: Buffer) {
+   129→      clearTimeout(timer);
+   130→      socket.removeListener('data', onData);
+   131→      socket.removeListener('error', onError);
+   132→      socket.removeListener('close', onClose);
+   133→
+   134→      const response = data.toString().trim();
+   135→      console.log(`[TCP] RX ← ${response}`);
+   136→      resolve(response);
+   137→    }
+   138→
+   139→    function onError(err: Error) {
+   140→      clearTimeout(timer);
+   141→      socket.removeListener('data', onData);
+   142→      socket.removeListener('close', onClose);
+   143→      reject(new Error(`TCP error on command ${rawCommand}: ${err.message}`));
+   144→    }
+   145→
+   146→    function onClose() {
+   147→      clearTimeout(timer);
+   148→      socket.removeListener('data', onData);
+   149→      socket.removeListener('error', onError);
+   150→      reject(new Error(`TCP connection closed during command: ${rawCommand}`));
+   151→    }
+   152→
+   153→    socket.once('data', onData);
+   154→    socket.once('error', onError);
+   155→    socket.once('close', onClose);
+   156→
+   157→    socket.write(fullCommand, (err) => {
+   158→      if (err) {
+   159→        clearTimeout(timer);
+   160→        socket.removeListener('data', onData);
+   161→        socket.removeListener('error', onError);
+   162→        socket.removeListener('close', onClose);
+   163→        reject(new Error(`TCP write error: ${err.message}`));
+   164→      }
+   165→    });
+   166→  });
+   167→}
+   168→
+   169→function destroyDeviceConnection(device: DeviceConnection) {
+   170→  if (device.tiltSocket) {
+   171→    try { device.tiltSocket.destroy(); } catch {}
+   172→    device.tiltSocket = null;
+   173→  }
+   174→  if (device.panSocket) {
+   175→    try { device.panSocket.destroy(); } catch {}
+   176→    device.panSocket = null;
+   177→  }
+   178→  device.connected = false;
+   179→  device.connectedAt = null;
+   180→  device.status = 'disconnected';
+   181→  device.lastError = null;
+   182→}
+   183→
+   184→function isDeviceConnected(device: DeviceConnection): boolean {
+   185→  return device.connected &&
+   186→    device.tiltSocket !== null &&
+   187→    (device.model === 'TL.0400' ? device.panSocket !== null : true);
+   188→}
+   189→
+   190→// ─── Command Router ──────────────────────────────────────────────────────────
+   191→
+   192→const TL0400_TILT_COMMANDS = new Set([
+   193→  'MU', 'MD', 'SET_ACC_T', 'SET_DEC_T', 'SET_LIM_T', 'SET_SMODE_T',
+   194→  'SET_ACC', 'SET_DEC', 'SET_DZ', 'SET_LIM', 'SET_APT',
+   195→  'SET_BC', 'SET_SMODE', 'SET_TW', 'SET_TS', 'SET_EREC',
+   196→  'SET_PRI', 'SET_VF', 'SET_DAMP', 'SET_MCUR', 'SET_SYNC',
+   197→  'SPRS', 'RPRS', 'HOM', 'POS', 'STA', 'PNG', 'RST', 'STP', 'SSWG', 'ESWG',
+   198→]);
+   199→
+   200→const TL0400_PAN_COMMANDS = new Set([
+   201→  'ML', 'MR', 'SET_ACC_P', 'SET_DEC_P', 'SET_LIM_P', 'SET_SMODE_P',
+   202→]);
+   203→
+   204→function routeCommandToDevice(
+   205→  device: DeviceConnection,
+   206→  command: string,
+   207→  value?: string,
+   208→): Promise<string> {
+   209→  if (!isDeviceConnected(device)) {
+   210→    return Promise.reject(new Error(`Device ${device.model} is not connected`));
+   211→  }
+   212→
+   213→  const rawCommand = value ? `${command} ${value}` : command;
+   214→  const isDual = device.model === 'TL.0400';
+   215→
+   216→  if (isDual) {
+   217→    // TL.0400: route to tilt or pan socket based on command type
+   218→    const baseCommand = command.split('_').slice(0, 2).join('_');
+   219→    const isTilt = TL0400_TILT_COMMANDS.has(command) || TL0400_TILT_COMMANDS.has(baseCommand);
+   220→
+   221→    // Diagonal commands (MUL, MUR, MDL, MDR) need both sockets
+   222→    const diagonalCommands = ['MUL', 'MUR', 'MDL', 'MDR'];
+   223→    if (diagonalCommands.includes(command)) {
+   224→      const tiltMap: Record<string, string> = { MUL: 'MU', MUR: 'MU', MDL: 'MD', MDR: 'MD' };
+   225→      const panMap: Record<string, string> = { MUL: 'ML', MUR: 'MR', MDL: 'ML', MDR: 'MR' };
+   226→      const tiltCmd = tiltMap[command];
+   227→      const panCmd = panMap[command];
+   228→
+   229→      if (!device.tiltSocket || !device.panSocket) {
+   230→        return Promise.reject(new Error(`Device ${device.model} missing tilt or pan socket`));
+   231→      }
+   232→
+   233→      // Send to both sockets concurrently
+   234→      return Promise.all([
+   235→        sendTcpCommand(device.tiltSocket, tiltCmd),
+   236→        sendTcpCommand(device.panSocket, panCmd),
+   237→      ]).then(([tiltRes, panRes]) => {
+   238→        return `${tiltRes} | ${panRes}`;
+   239→      });
+   240→    }
+   241→
+   242→    // GOTO needs both
+   243→    if (command === 'GOTO' && value) {
+   244→      if (!device.tiltSocket || !device.panSocket) {
+   245→        return Promise.reject(new Error(`Device ${device.model} missing tilt or pan socket`));
+   246→      }
+   247→      const parts = value.split(',');
+   248→      const el = parts[1]?.trim() || '0';
+   249→      const az = parts[0]?.trim() || '0';
+   250→      return Promise.all([
+   251→        sendTcpCommand(device.tiltSocket, `GOTO 0,${el}`),
+   252→        sendTcpCommand(device.panSocket, `GOTO ${az},0`),
+   253→      ]).then(([tiltRes, panRes]) => {
+   254→        return `${tiltRes} | ${panRes}`;
+   255→      });
+   256→    }
+   257→
+   258→    // SPD needs both
+   259→    if (command === 'SPD') {
+   260→      if (!device.tiltSocket || !device.panSocket) {
+   261→        return Promise.reject(new Error(`Device ${device.model} missing tilt or pan socket`));
+   262→      }
+   263→      return Promise.all([
+   264→        sendTcpCommand(device.tiltSocket, rawCommand),
+   265→        sendTcpCommand(device.panSocket, rawCommand),
+   266→      ]).then(([tiltRes, panRes]) => {
+   267→        return `${tiltRes} | ${panRes}`;
+   268→      });
+   269→    }
+   270→
+   271→    if (isTilt && device.tiltSocket) {
+   272→      return sendTcpCommand(device.tiltSocket, rawCommand);
+   273→    } else if (device.panSocket) {
+   274→      return sendTcpCommand(device.panSocket, rawCommand);
+   275→    } else {
+   276→      return Promise.reject(new Error(`No suitable TCP socket for command ${command} on ${device.model}`));
+   277→    }
+   278→  } else {
+   279→    // Single-socket devices (TL.0009, TL.0250, TL.0320)
+   280→    if (!device.tiltSocket) {
+   281→      return Promise.reject(new Error(`Device ${device.model} not connected`));
+   282→    }
+   283→    return sendTcpCommand(device.tiltSocket, rawCommand);
+   284→  }
+   285→}
+   286→
+   287→// ─── Direction Mapping ───────────────────────────────────────────────────────
+   288→
+   289→const DIRECTION_MAP: Record<string, string> = {
+   290→  'up': 'MU',
+   291→  'down': 'MD',
+   292→  'left': 'ML',
+   293→  'right': 'MR',
+   294→  'up-left': 'MUL',
+   295→  'up-right': 'MUR',
+   296→  'down-left': 'MDL',
+   297→  'down-right': 'MDR',
+   298→};
+   299→
+   300→// ─── Express + HTTP Server ───────────────────────────────────────────────────
+   301→
+   302→const app = express();
+   303→app.use(express.json());
+   304→
+   305→const httpServer = createServer(app);
+   306→
+   307→// ─── Socket.IO ───────────────────────────────────────────────────────────────
+   308→
+   309→const io = new Server(httpServer, {
+   310→  path: '/socket.io',
+   311→  cors: { origin: '*', methods: ['GET', 'POST'] },
+   312→  pingTimeout: 60000,
+   313→  pingInterval: 25000,
+   314→});
+   315→
+   316→// ─── HTTP REST Endpoints ─────────────────────────────────────────────────────
+   317→
+   318→app.get('/health', (_req, res) => {
+   319→  const deviceStatuses: Record<string, { connected: boolean; lastError: string | null }> = {};
+   320→  for (const [model, device] of devices) {
+   321→    deviceStatuses[model] = {
+   322→      connected: isDeviceConnected(device),
+   323→      lastError: device.lastError,
+   324→    };
+   325→  }
+   326→  res.json({
+   327→    status: 'ok',
+   328→    uptime: Math.floor((Date.now() - startTime) / 1000),
+   329→    devices: deviceStatuses,
+   330→  });
+   331→});
+   332→
+   333→app.post('/command', async (req, res) => {
+   334→  const { model, command, value } = req.body;
+   335→
+   336→  if (!model || !command) {
+   337→    res.status(400).json({ success: false, error: 'Missing model or command' });
+   338→    return;
+   339→  }
+   340→
+   341→  if (!VALID_COMMANDS.has(command)) {
+   342→    res.status(400).json({ success: false, error: `Unknown command: ${command}` });
+   343→    return;
+   344→  }
+   345→
+   346→  const device = getDevice(model);
+   347→  if (!device) {
+   348→    res.status(404).json({ success: false, error: `Device ${model} not found. Connect first.` });
+   349→    return;
+   350→  }
+   351→
+   352→  const t0 = Date.now();
+   353→  try {
+   354→    const data = await routeCommandToDevice(device, command, value);
+   355→    const duration = Date.now() - t0;
+   356→    const success = !data.startsWith('ERR');
+   357→    res.json({ success, data, error: success ? undefined : data, duration });
+   358→  } catch (err: any) {
+   359→    const duration = Date.now() - t0;
+   360→    res.status(502).json({ success: false, error: err.message, duration });
+   361→  }
+   362→});
+   363→
+   364→// ─── Mobile HTML Page ────────────────────────────────────────────────────────
+   365→
+   366→const MOBILE_HTML = `<!DOCTYPE html>
+   367→<html lang="en" class="dark">
+   368→<head>
+   369→<meta charset="UTF-8">
+   370→<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+   371→<title>TechLaser Mobile Control</title>
+   372→<script src="/socket.io/socket.io.js"><\/script>
+   373→<style>
+   374→  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+   375→
+   376→  :root {
+   377→    --bg-primary: #0a0f0d;
+   378→    --bg-secondary: #111916;
+   379→    --bg-card: #151d19;
+   380→    --bg-elevated: #1a2520;
+   381→    --border: #1e2e27;
+   382→    --border-bright: #2a3d33;
+   383→    --text-primary: #e8f5e9;
+   384→    --text-secondary: #7da88a;
+   385→    --text-muted: #4a6b55;
+   386→    --accent: #10b981;
+   387→    --accent-glow: rgba(16, 185, 129, 0.3);
+   388→    --amber: #f59e0b;
+   389→    --red: #ef4444;
+   390→    --red-glow: rgba(239, 68, 68, 0.3);
+   391→  }
+   392→
+   393→  html, body {
+   394→    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
+   395→    background: var(--bg-primary);
+   396→    color: var(--text-primary);
+   397→    min-height: 100vh;
+   398→    min-height: 100dvh;
+   399→    overflow-x: hidden;
+   400→    -webkit-tap-highlight-color: transparent;
+   401→    touch-action: manipulation;
+   402→  }
+   403→
+   404→  body {
+   405→    display: flex;
+   406→    flex-direction: column;
+   407→    padding: env(safe-area-inset-top) 12px env(safe-area-inset-bottom);
+   408→    max-width: 480px;
+   409→    margin: 0 auto;
+   410→    gap: 12px;
+   411→    padding-top: max(env(safe-area-inset-top), 12px);
+   412→    padding-bottom: max(env(safe-area-inset-bottom), 16px);
+   413→  }
+   414→
+   415→  /* Header */
+   416→  .header {
+   417→    display: flex;
+   418→    align-items: center;
+   419→    justify-content: space-between;
+   420→    padding: 8px 4px;
+   421→  }
+   422→  .header h1 {
+   423→    font-size: 16px;
+   424→    font-weight: 700;
+   425→    letter-spacing: 2px;
+   426→    text-transform: uppercase;
+   427→    color: var(--accent);
+   428→    text-shadow: 0 0 12px var(--accent-glow);
+   429→  }
+   430→  .status-badge {
+   431→    display: flex;
+   432→    align-items: center;
+   433→    gap: 6px;
+   434→    font-size: 11px;
+   435→    color: var(--text-secondary);
+   436→    background: var(--bg-card);
+   437→    border: 1px solid var(--border);
+   438→    border-radius: 20px;
+   439→    padding: 4px 10px;
+   440→  }
+   441→  .status-dot {
+   442→    width: 8px;
+   443→    height: 8px;
+   444→    border-radius: 50%;
+   445→    background: var(--red);
+   446→    box-shadow: 0 0 6px var(--red-glow);
+   447→    transition: background 0.3s, box-shadow 0.3s;
+   448→  }
+   449→  .status-dot.connected {
+   450→    background: var(--accent);
+   451→    box-shadow: 0 0 8px var(--accent-glow);
+   452→    animation: pulse 2s infinite;
+   453→  }
+   454→
+   455→  @keyframes pulse {
+   456→    0%, 100% { opacity: 1; }
+   457→    50% { opacity: 0.5; }
+   458→  }
+   459→
+   460→  /* Device selector */
+   461→  .device-bar {
+   462→    display: flex;
+   463→    gap: 6px;
+   464→    overflow-x: auto;
+   465→    scrollbar-width: none;
+   466→    -ms-overflow-style: none;
+   467→    padding: 2px 0;
+   468→  }
+   469→  .device-bar::-webkit-scrollbar { display: none; }
+   470→  .device-btn {
+   471→    flex-shrink: 0;
+   472→    padding: 8px 14px;
+   473→    font-size: 12px;
+   474→    font-family: inherit;
+   475→    font-weight: 600;
+   476→    background: var(--bg-card);
+   477→    color: var(--text-secondary);
+   478→    border: 1px solid var(--border);
+   479→    border-radius: 8px;
+   480→    cursor: pointer;
+   481→    transition: all 0.15s;
+   482→    letter-spacing: 0.5px;
+   483→  }
+   484→  .device-btn.active {
+   485→    background: var(--bg-elevated);
+   486→    color: var(--accent);
+   487→    border-color: var(--accent);
+   488→    box-shadow: 0 0 10px var(--accent-glow), inset 0 0 10px rgba(16, 185, 129, 0.05);
+   489→  }
+   490→
+   491→  /* Telemetry */
+   492→  .telemetry {
+   493→    display: grid;
+   494→    grid-template-columns: 1fr 1fr;
+   495→    gap: 8px;
+   496→  }
+   497→  .telem-card {
+   498→    background: var(--bg-card);
+   499→    border: 1px solid var(--border);
+   500→    border-radius: 10px;
+   501→    padding: 10px 12px;
+   502→  }
+   503→  .telem-label {
+   504→    font-size: 10px;
+   505→    color: var(--text-muted);
+   506→    text-transform: uppercase;
+   507→    letter-spacing: 1px;
+   508→    margin-bottom: 4px;
+   509→  }
+   510→  .telem-value {
+   511→    font-size: 22px;
+   512→    font-weight: 700;
+   513→    color: var(--text-primary);
+   514→    line-height: 1;
+   515→  }
+   516→  .telem-value .unit {
+   517→    font-size: 12px;
+   518→    color: var(--text-secondary);
+   519→    font-weight: 400;
+   520→    margin-left: 2px;
+   521→  }
+   522→  .telem-card.wide { grid-column: 1 / -1; }
+   523→
+   524→  /* D-Pad */
+   525→  .dpad-container {
+   526→    display: flex;
+   527→    justify-content: center;
+   528→    padding: 8px 0;
+   529→  }
+   530→  .dpad {
+   531→    display: grid;
+   532→    grid-template-columns: repeat(3, 64px);
+   533→    grid-template-rows: repeat(3, 64px);
+   534→    gap: 6px;
+   535→  }
+   536→  .dpad-btn {
+   537→    display: flex;
+   538→    align-items: center;
+   539→    justify-content: center;
+   540→    background: var(--bg-card);
+   541→    border: 1px solid var(--border);
+   542→    border-radius: 12px;
+   543→    color: var(--text-secondary);
+   544→    font-size: 22px;
+   545→    cursor: pointer;
+   546→    transition: all 0.1s;
+   547→    user-select: none;
+   548→    -webkit-user-select: none;
+   549→    touch-action: none;
+   550→  }
+   551→  .dpad-btn:active, .dpad-btn.pressing {
+   552→    background: var(--accent);
+   553→    color: var(--bg-primary);
+   554→    border-color: var(--accent);
+   555→    box-shadow: 0 0 16px var(--accent-glow);
+   556→    transform: scale(0.93);
+   557→  }
+   558→  .dpad-btn.stop-btn {
+   559→    background: rgba(239, 68, 68, 0.12);
+   560→    border-color: rgba(239, 68, 68, 0.3);
+   561→    color: var(--red);
+   562→    font-size: 11px;
+   563→    font-weight: 700;
+   564→    letter-spacing: 1px;
+   565→  }
+   566→  .dpad-btn.stop-btn:active, .dpad-btn.stop-btn.pressing {
+   567→    background: var(--red);
+   568→    color: white;
+   569→    box-shadow: 0 0 16px var(--red-glow);
+   570→  }
+   571→  .dpad-btn.empty {
+   572→    background: transparent;
+   573→    border-color: transparent;
+   574→    cursor: default;
+   575→  }
+   576→  .dpad-center {
+   577→    grid-column: 2;
+   578→    grid-row: 2;
+   579→  }
+   580→  .dpad-up { grid-column: 2; grid-row: 1; }
+   581→  .dpad-up-left { grid-column: 1; grid-row: 1; }
+   582→  .dpad-up-right { grid-column: 3; grid-row: 1; }
+   583→  .dpad-left { grid-column: 1; grid-row: 2; }
+   584→  .dpad-right { grid-column: 3; grid-row: 2; }
+   585→  .dpad-down { grid-column: 2; grid-row: 3; }
+   586→  .dpad-down-left { grid-column: 1; grid-row: 3; }
+   587→  .dpad-down-right { grid-column: 3; grid-row: 3; }
+   588→
+   589→  /* Speed Slider */
+   590→  .speed-section {
+   591→    background: var(--bg-card);
+   592→    border: 1px solid var(--border);
+   593→    border-radius: 10px;
+   594→    padding: 12px 16px;
+   595→  }
+   596→  .speed-header {
+   597→    display: flex;
+   598→    justify-content: space-between;
+   599→    align-items: center;
+   600→    margin-bottom: 8px;
+   601→  }
+   602→  .speed-label {
+   603→    font-size: 11px;
+   604→    color: var(--text-muted);
+   605→    text-transform: uppercase;
+   606→    letter-spacing: 1px;
+   607→  }
+   608→  .speed-value {
+   609→    font-size: 18px;
+   610→    font-weight: 700;
+   611→    color: var(--accent);
+   612→    min-width: 30px;
+   613→    text-align: right;
+   614→  }
+   615→  .speed-track {
+   616→    width: 100%;
+   617→    height: 6px;
+   618→    -webkit-appearance: none;
+   619→    appearance: none;
+   620→    background: var(--border);
+   621→    border-radius: 3px;
+   622→    outline: none;
+   623→  }
+   624→  .speed-track::-webkit-slider-thumb {
+   625→    -webkit-appearance: none;
+   626→    appearance: none;
+   627→    width: 24px;
+   628→    height: 24px;
+   629→    border-radius: 50%;
+   630→    background: var(--accent);
+   631→    border: 2px solid var(--bg-primary);
+   632→    box-shadow: 0 0 8px var(--accent-glow);
+   633→    cursor: pointer;
+   634→  }
+   635→  .speed-track::-moz-range-thumb {
+   636→    width: 24px;
+   637→    height: 24px;
+   638→    border-radius: 50%;
+   639→    background: var(--accent);
+   640→    border: 2px solid var(--bg-primary);
+   641→    box-shadow: 0 0 8px var(--accent-glow);
+   642→    cursor: pointer;
+   643→  }
+   644→
+   645→  /* Action Buttons */
+   646→  .actions {
+   647→    display: grid;
+   648→    grid-template-columns: 1fr 1fr;
+   649→    gap: 8px;
+   650→  }
+   651→  .action-btn {
+   652→    padding: 12px;
+   653→    font-family: inherit;
+   654→    font-size: 12px;
+   655→    font-weight: 600;
+   656→    letter-spacing: 0.5px;
+   657→    border: 1px solid var(--border);
+   658→    border-radius: 10px;
+   659→    cursor: pointer;
+   660→    transition: all 0.15s;
+   661→    text-transform: uppercase;
+   662→  }
+   663→  .action-btn.primary {
+   664→    background: rgba(16, 185, 129, 0.12);
+   665→    color: var(--accent);
+   666→    border-color: rgba(16, 185, 129, 0.25);
+   667→  }
+   668→  .action-btn.primary:active {
+   669→    background: var(--accent);
+   670→    color: var(--bg-primary);
+   671→    box-shadow: 0 0 12px var(--accent-glow);
+   672→  }
+   673→  .action-btn.secondary {
+   674→    background: var(--bg-card);
+   675→    color: var(--text-secondary);
+   676→  }
+   677→  .action-btn.secondary:active {
+   678→    background: var(--bg-elevated);
+   679→    border-color: var(--border-bright);
+   680→  }
+   681→
+   682→  /* Connect Button */
+   683→  .connect-section {
+   684→    display: flex;
+   685→    gap: 8px;
+   686→  }
+   687→  .connect-btn {
+   688→    flex: 1;
+   689→    padding: 14px;
+   690→    font-family: inherit;
+   691→    font-size: 13px;
+   692→    font-weight: 700;
+   693→    letter-spacing: 1px;
+   694→    text-transform: uppercase;
+   695→    border-radius: 10px;
+   696→    cursor: pointer;
+   697→    transition: all 0.15s;
+   698→  }
+   699→  .connect-btn.connect {
+   700→    background: var(--accent);
+   701→    color: var(--bg-primary);
+   702→    border: none;
+   703→    box-shadow: 0 0 16px var(--accent-glow);
+   704→  }
+   705→  .connect-btn.connect:active {
+   706→    opacity: 0.8;
+   707→    transform: scale(0.98);
+   708→  }
+   709→  .connect-btn.disconnect {
+   710→    background: rgba(239, 68, 68, 0.12);
+   711→    color: var(--red);
+   712→    border: 1px solid rgba(239, 68, 68, 0.3);
+   713→  }
+   714→  .connect-btn.disconnect:active {
+   715→    background: var(--red);
+   716→    color: white;
+   717→  }
+   718→
+   719→  /* Log */
+   720→  .log-section {
+   721→    background: var(--bg-card);
+   722→    border: 1px solid var(--border);
+   723→    border-radius: 10px;
+   724→    padding: 10px 12px;
+   725→    max-height: 150px;
+   726→    overflow-y: auto;
+   727→  }
+   728→  .log-title {
+   729→    font-size: 10px;
+   730→    color: var(--text-muted);
+   731→    text-transform: uppercase;
+   732→    letter-spacing: 1px;
+   733→    margin-bottom: 6px;
+   734→  }
+   735→  .log-entry {
+   736→    font-size: 11px;
+   737→    color: var(--text-secondary);
+   738→    padding: 2px 0;
+   739→    border-bottom: 1px solid var(--border);
+   740→    display: flex;
+   741→    gap: 8px;
+   742→  }
+   743→  .log-entry:last-child { border-bottom: none; }
+   744→  .log-time { color: var(--text-muted); flex-shrink: 0; }
+   745→  .log-ok { color: var(--accent); }
+   746→  .log-err { color: var(--red); }
+   747→
+   748→  /* Scrollbar */
+   749→  ::-webkit-scrollbar { width: 4px; }
+   750→  ::-webkit-scrollbar-track { background: transparent; }
+   751→  ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+   752→</style>
+   753→</head>
+   754→<body>
+   755→
+   756→  <!-- Header -->
+   757→  <div class="header">
+   758→    <h1>TechLaser</h1>
+   759→    <div class="status-badge">
+   760→      <div class="status-dot" id="statusDot"></div>
+   761→      <span id="statusText">Disconnected</span>
+   762→    </div>
+   763→  </div>
+   764→
+   765→  <!-- Device Selector -->
+   766→  <div class="device-bar" id="deviceBar">
+   767→    <button class="device-btn active" data-model="TL.0009">TL.0009</button>
+   768→    <button class="device-btn" data-model="TL.0250">TL.0250</button>
+   769→    <button class="device-btn" data-model="TL.0320">TL.0320</button>
+   770→    <button class="device-btn" data-model="TL.0400">TL.0400</button>
+   771→  </div>
+   772→
+   773→  <!-- Telemetry -->
+   774→  <div class="telemetry">
+   775→    <div class="telem-card">
+   776→      <div class="telem-label">Azimuth</div>
+   777→      <div class="telem-value" id="azValue">--<span class="unit">\u00b0</span></div>
+   778→    </div>
+   779→    <div class="telem-card">
+   780→      <div class="telem-label">Elevation</div>
+   781→      <div class="telem-value" id="elValue">--<span class="unit">\u00b0</span></div>
+   782→    </div>
+   783→    <div class="telem-card wide">
+   784→      <div class="telem-label">Status</div>
+   785→      <div class="telem-value" id="statusValue" style="font-size:13px;color:var(--text-secondary)">No Device</div>
+   786→    </div>
+   787→  </div>
+   788→
+   789→  <!-- D-Pad -->
+   790→  <div class="dpad-container">
+   791→    <div class="dpad">
+   792→      <button class="dpad-btn dpad-up-left" data-dir="up-left">\u2196</button>
+   793→      <button class="dpad-btn dpad-up" data-dir="up">\u2191</button>
+   794→      <button class="dpad-btn dpad-up-right" data-dir="up-right">\u2197</button>
+   795→      <button class="dpad-btn dpad-left" data-dir="left">\u2190</button>
+   796→      <button class="dpad-btn dpad-center stop-btn" data-dir="stop">STOP</button>
+   797→      <button class="dpad-btn dpad-right" data-dir="right">\u2192</button>
+   798→      <button class="dpad-btn dpad-down-left" data-dir="down-left">\u2199</button>
+   799→      <button class="dpad-btn dpad-down" data-dir="down">\u2193</button>
+   800→      <button class="dpad-btn dpad-down-right" data-dir="down-right">\u2198</button>
+   801→    </div>
+   802→  </div>
+   803→
+   804→  <!-- Speed -->
+   805→  <div class="speed-section">
+   806→    <div class="speed-header">
+   807→      <span class="speed-label">Speed</span>
+   808→      <span class="speed-value" id="speedDisplay">5</span>
+   809→    </div>
+   810→    <input type="range" class="speed-track" id="speedSlider" min="1" max="10" value="5" step="1">
+   811→  </div>
+   812→
+   813→  <!-- Actions -->
+   814→  <div class="actions">
+   815→    <button class="action-btn primary" id="homeBtn">\u2302 Home</button>
+   816→    <button class="action-btn primary" id="pingBtn">\u25cf Ping</button>
+   817→    <button class="action-btn secondary" id="preset1Btn">Preset 1</button>
+   818→    <button class="action-btn secondary" id="preset2Btn">Preset 2</button>
+   819→  </div>
+   820→
+   821→  <!-- Connect -->
+   822→  <div class="connect-section">
+   823→    <button class="connect-btn connect" id="connectBtn">Connect Device</button>
+   824→  </div>
+   825→
+   826→  <!-- Log -->
+   827→  <div class="log-section">
+   828→    <div class="log-title">Command Log</div>
+   829→    <div id="logEntries"></div>
+   830→  </div>
+   831→
+   832→<script>
+   833→(function() {
+   834→  let currentModel = 'TL.0009';
+   835→  let deviceConnected = false;
+   836→  const socket = io({ path: '/socket.io' });
+   837→
+   838→  // --- UI refs ---
+   839→  const statusDot = document.getElementById('statusDot');
+   840→  const statusText = document.getElementById('statusText');
+   841→  const azValue = document.getElementById('azValue');
+   842→  const elValue = document.getElementById('elValue');
+   843→  const statusValue = document.getElementById('statusValue');
+   844→  const speedDisplay = document.getElementById('speedDisplay');
+   845→  const speedSlider = document.getElementById('speedSlider');
+   846→  const logEntries = document.getElementById('logEntries');
+   847→  const connectBtn = document.getElementById('connectBtn');
+   848→
+   849→  function setConnected(connected) {
+   850→    deviceConnected = connected;
+   851→    statusDot.classList.toggle('connected', connected);
+   852→    statusText.textContent = connected ? 'Connected' : 'Disconnected';
+   853→    if (connected) {
+   854→      connectBtn.textContent = 'Disconnect';
+   855→      connectBtn.classList.remove('connect');
+   856→      connectBtn.classList.add('disconnect');
+   857→    } else {
+   858→      connectBtn.textContent = 'Connect Device';
+   859→      connectBtn.classList.remove('disconnect');
+   860→      connectBtn.classList.add('connect');
+   861→      azValue.innerHTML = '--<span class="unit">\u00b0</span>';
+   862→      elValue.innerHTML = '--<span class="unit">\u00b0</span>';
+   863→      statusValue.textContent = 'No Device';
+   864→      statusValue.style.color = 'var(--text-secondary)';
+   865→    }
+   866→  }
+   867→
+   868→  function addLog(cmd, ok) {
+   869→    const entry = document.createElement('div');
+   870→    entry.className = 'log-entry';
+   871→    const now = new Date();
+   872→    const time = now.toLocaleTimeString('en-US', { hour12: false });
+   873→    const cls = ok ? 'log-ok' : 'log-err';
+   874→    entry.innerHTML = '<span class="log-time">' + time + '</span><span class="' + cls + '">' + cmd + ' \u2192 ' + (ok ? 'OK' : 'FAIL') + '</span>';
+   875→    logEntries.prepend(entry);
+   876→    // Keep max 30 entries
+   877→    while (logEntries.children.length > 30) {
+   878→      logEntries.removeChild(logEntries.lastChild);
+   879→    }
+   880→  }
+   881→
+   882→  // --- Socket.IO events ---
+   883→  socket.on('connect', function() {
+   884→    addLog('Socket connected', true);
+   885→  });
+   886→
+   887→  socket.on('disconnect', function() {
+   888→    addLog('Socket disconnected', false);
+   889→    setConnected(false);
+   890→  });
+   891→
+   892→  socket.on('device-status', function(data) {
+   893→    if (data.model === currentModel) {
+   894→      setConnected(data.status === 'connected');
+   895→      addLog(data.message || (data.status === 'connected' ? 'Device connected' : 'Device disconnected'), data.status === 'connected');
+   896→    }
+   897→  });
+   898→
+   899→  socket.on('command-response', function(data) {
+   900→    addLog(data.command + (data.success ? '' : ': ' + (data.error || '')), data.success);
+   901→  });
+   902→
+   903→  socket.on('telemetry', function(data) {
+   904→    if (data.model === currentModel) {
+   905→      azValue.innerHTML = (data.azimuth != null ? data.azimuth.toFixed(1) : '--') + '<span class="unit">\u00b0</span>';
+   906→      elValue.innerHTML = (data.elevation != null ? data.elevation.toFixed(1) : '--') + '<span class="unit">\u00b0</span>';
+   907→      statusValue.textContent = data.status || 'Unknown';
+   908→      statusValue.style.color = (data.status === 'Idle') ? 'var(--text-secondary)' : 'var(--accent)';
+   909→    }
+   910→  });
+   911→
+   912→  // --- Device selector ---
+   913→  document.getElementById('deviceBar').addEventListener('click', function(e) {
+   914→    const btn = e.target.closest('.device-btn');
+   915→    if (!btn) return;
+   916→    document.querySelectorAll('.device-btn').forEach(function(b) { b.classList.remove('active'); });
+   917→    btn.classList.add('active');
+   918→    currentModel = btn.dataset.model;
+   919→    setConnected(false);
+   920→    // Query current status
+   921→    socket.emit('telemetry-request', { model: currentModel });
+   922→  });
+   923→
+   924→  // --- Connect / Disconnect ---
+   925→  connectBtn.addEventListener('click', function() {
+   926→    if (deviceConnected) {
+   927→      socket.emit('disconnect-device', { model: currentModel });
+   928→    } else {
+   929→      socket.emit('connect-device', { model: currentModel });
+   930→    }
+   931→  });
+   932→
+   933→  // --- D-Pad (touch + mouse) ---
+   934→  let moveInterval = null;
+   935→  let moveDirection = null;
+   936→
+   937→  function startMove(dir) {
+   938→    if (dir === 'stop') {
+   939→      socket.emit('stop', { model: currentModel });
+   940→      return;
+   941→    }
+   942→    moveDirection = dir;
+   943→    // Send immediately
+   944→    socket.emit('move', { model: currentModel, direction: dir, speed: parseInt(speedSlider.value) });
+   945→    // Repeat while held
+   946→    clearInterval(moveInterval);
+   947→    moveInterval = setInterval(function() {
+   948→      if (moveDirection) {
+   949→        socket.emit('move', { model: currentModel, direction: moveDirection, speed: parseInt(speedSlider.value) });
+   950→      }
+   951→    }, 200);
+   952→  }
+   953→
+   954→  function stopMove() {
+   955→    moveDirection = null;
+   956→    clearInterval(moveInterval);
+   957→    moveInterval = null;
+   958→    socket.emit('stop', { model: currentModel });
+   959→  }
+   960→
+   961→  document.querySelectorAll('.dpad-btn').forEach(function(btn) {
+   962→    const dir = btn.dataset.dir;
+   963→
+   964→    btn.addEventListener('touchstart', function(e) {
+   965→      e.preventDefault();
+   966→      btn.classList.add('pressing');
+   967→      startMove(dir);
+   968→    }, { passive: false });
+   969→
+   970→    btn.addEventListener('touchend', function(e) {
+   971→      e.preventDefault();
+   972→      btn.classList.remove('pressing');
+   973→      if (dir !== 'stop') stopMove();
+   974→    }, { passive: false });
+   975→
+   976→    btn.addEventListener('touchcancel', function() {
+   977→      btn.classList.remove('pressing');
+   978→      if (dir !== 'stop') stopMove();
+   979→    });
+   980→
+   981→    btn.addEventListener('mousedown', function(e) {
+   982→      e.preventDefault();
+   983→      btn.classList.add('pressing');
+   984→      startMove(dir);
+   985→    });
+   986→
+   987→    btn.addEventListener('mouseup', function() {
+   988→      btn.classList.remove('pressing');
+   989→      if (dir !== 'stop') stopMove();
+   990→    });
+   991→
+   992→    btn.addEventListener('mouseleave', function() {
+   993→      btn.classList.remove('pressing');
+   994→      if (dir !== 'stop' && moveDirection) stopMove();
+   995→    });
+   996→  });
+   997→
+   998→  // --- Speed slider ---
+   999→  speedSlider.addEventListener('input', function() {
+  1000→    const speed = parseInt(this.value);
+  1001→    speedDisplay.textContent = speed;
+  1002→    socket.emit('set-speed', { model: currentModel, speed: speed });
+  1003→  });
+  1004→
+  1005→  // --- Action buttons ---
+  1006→  document.getElementById('homeBtn').addEventListener('click', function() {
+  1007→    socket.emit('home', { model: currentModel });
+  1008→  });
+  1009→
+  1010→  document.getElementById('pingBtn').addEventListener('click', function() {
+  1011→    socket.emit('command', { model: currentModel, command: 'PNG' });
+  1012→  });
+  1013→
+  1014→  document.getElementById('preset1Btn').addEventListener('click', function() {
+  1015→    socket.emit('recall-preset', { model: currentModel, slot: 1 });
+  1016→  });
+  1017→
+  1018→  document.getElementById('preset2Btn').addEventListener('click', function() {
+  1019→    socket.emit('recall-preset', { model: currentModel, slot: 2 });
+  1020→  });
+  1021→
+  1022→  // Prevent context menu on long press
+  1023→  document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+  1024→
+  1025→})();
+  1026→<\/script>
+  1027→</body>
+  1028→</html>`;
+  1029→
+  1030→app.get('/', (_req, res) => {
+  1031→  res.type('html').send(MOBILE_HTML);
+  1032→});
+  1033→
+  1034→// ─── Socket.IO Event Handlers ────────────────────────────────────────────────
+  1035→
+  1036→io.on('connection', (socket) => {
+  1037→  console.log(`[Bridge] Socket.IO client connected: ${socket.id}`);
+  1038→
+  1039→  // Connect to a PTU device via real TCP
+  1040→  socket.on('connect-device', async (data: {
+  1041→    model: string;
+  1042→    tiltIp?: string;
+  1043→    tiltPort?: number;
+  1044→    panIp?: string;
+  1045→    panPort?: number;
+  1046→  }) => {
+  1047→    const { model } = data;
+  1048→    console.log(`[Bridge] connect-device: ${model}`);
+  1049→
+  1050→    const device = getOrCreateDevice(model);
+  1051→    const isDual = model === 'TL.0400';
+  1052→
+  1053→    // Update IPs if provided
+  1054→    if (data.tiltIp) device.tiltIp = data.tiltIp;
+  1055→    if (data.tiltPort) device.tiltPort = data.tiltPort;
+  1056→    if (data.panIp) device.panIp = data.panIp;
+  1057→    if (data.panPort) device.panPort = data.panPort;
+  1058→
+  1059→    // Clean up any existing connection
+  1060→    destroyDeviceConnection(device);
+  1061→
+  1062→    try {
+  1063→      // Connect tilt socket
+  1064→      const tiltSocket = await connectTcpSocket(device.tiltIp, device.tiltPort);
+  1065→      device.tiltSocket = tiltSocket;
+  1066→
+  1067→      // Configure keepalive on the socket
+  1068→      tiltSocket.setKeepAlive(true, 10000);
+  1069→      tiltSocket.on('error', (err) => {
+  1070→        console.error(`[TCP] Tilt socket error (${model}): ${err.message}`);
+  1071→        device.lastError = err.message;
+  1072→        device.connected = false;
+  1073→        device.status = 'error';
+  1074→        io.emit('device-status', { model, status: 'error', message: `Tilt connection error: ${err.message}` });
+  1075→      });
+  1076→      tiltSocket.on('close', () => {
+  1077→        if (device.connected) {
+  1078→          console.warn(`[TCP] Tilt socket closed unexpectedly (${model})`);
+  1079→          device.connected = false;
+  1080→          device.status = 'disconnected';
+  1081→          device.tiltSocket = null;
+  1082→          // Also close pan if it exists
+  1083→          if (device.panSocket) {
+  1084→            try { device.panSocket.destroy(); } catch {}
+  1085→            device.panSocket = null;
+  1086→          }
+  1087→          io.emit('device-status', { model, status: 'disconnected', message: 'Tilt connection lost' });
+  1088→        }
+  1089→      });
+  1090→
+  1091→      // Connect pan socket for dual-axis devices
+  1092→      if (isDual) {
+  1093→        const panSocket = await connectTcpSocket(device.panIp, device.panPort);
+  1094→        device.panSocket = panSocket;
+  1095→        panSocket.setKeepAlive(true, 10000);
+  1096→        panSocket.on('error', (err) => {
+  1097→          console.error(`[TCP] Pan socket error (${model}): ${err.message}`);
+  1098→          device.lastError = err.message;
+  1099→          // Don't fully disconnect — pan error is recoverable
+  1100→          io.emit('device-status', { model, status: 'error', message: `Pan connection error: ${err.message}` });
+  1101→        });
+  1102→        panSocket.on('close', () => {
+  1103→          if (device.connected && device.panSocket === panSocket) {
+  1104→            console.warn(`[TCP] Pan socket closed unexpectedly (${model})`);
+  1105→            device.panSocket = null;
+  1106→          }
+  1107→        });
+  1108→      }
+  1109→
+  1110→      device.connected = true;
+  1111→      device.connectedAt = Date.now();
+  1112→      device.lastError = null;
+  1113→      device.status = 'connected';
+  1114→
+  1115→      // Read initial position
+  1116→      try {
+  1117→        const posResponse = await sendTcpCommand(device.tiltSocket, 'POS');
+  1118→        const azMatch = posResponse.match(/AZ:([-\d.]+)/);
+  1119→        const elMatch = posResponse.match(/EL:([-\d.]+)/);
+  1120→        if (azMatch) device.azimuth = parseFloat(azMatch[1]);
+  1121→        if (elMatch) device.elevation = parseFloat(elMatch[1]);
+  1122→      } catch {
+  1123→        // Non-critical — initial position read failed
+  1124→      }
+  1125→
+  1126→      socket.emit('device-status', {
+  1127→        model,
+  1128→        status: 'connected',
+  1129→        message: `Connected to ${model} at ${device.tiltIp}:${device.tiltPort}${isDual ? ` + ${device.panIp}:${device.panPort}` : ''}`,
+  1130→      });
+  1131→
+  1132→      console.log(`[Bridge] Device ${model} connected via real TCP`);
+  1133→
+  1134→    } catch (err: any) {
+  1135→      destroyDeviceConnection(device);
+  1136→      device.lastError = err.message;
+  1137→
+  1138→      socket.emit('device-status', {
+  1139→        model,
+  1140→        status: 'error',
+  1141→        message: `Failed to connect: ${err.message}`,
+  1142→      });
+  1143→
+  1144→      console.error(`[Bridge] Failed to connect ${model}: ${err.message}`);
+  1145→    }
+  1146→  });
+  1147→
+  1148→  // Disconnect from a device
+  1149→  socket.on('disconnect-device', (data: { model: string }) => {
+  1150→    const { model } = data;
+  1151→    const device = getDevice(model);
+  1152→    console.log(`[Bridge] disconnect-device: ${model}`);
+  1153→
+  1154→    if (device) {
+  1155→      destroyDeviceConnection(device);
+  1156→    }
+  1157→
+  1158→    socket.emit('device-status', {
+  1159→      model,
+  1160→      status: 'disconnected',
+  1161→      message: `Disconnected from ${model}`,
+  1162→    });
+  1163→  });
+  1164→
+  1165→  // Generic command
+  1166→  socket.on('command', async (data: { model: string; command: string; value?: string }) => {
+  1167→    const { model, command, value } = data;
+  1168→    const t0 = Date.now();
+  1169→    console.log(`[Bridge] command: ${model} -> ${command}${value ? ` ${value}` : ''}`);
+  1170→
+  1171→    const device = getDevice(model);
+  1172→    if (!device) {
+  1173→      socket.emit('command-response', {
+  1174→        model, command, success: false,
+  1175→        error: `Device ${model} not found. Connect first.`,
+  1176→        duration: Date.now() - t0,
+  1177→      });
+  1178→      return;
+  1179→    }
+  1180→
+  1181→    try {
+  1182→      const responseData = await routeCommandToDevice(device, command, value);
+  1183→      const duration = Date.now() - t0;
+  1184→      const success = !responseData.startsWith('ERR');
+  1185→
+  1186→      socket.emit('command-response', {
+  1187→        model, command, success,
+  1188→        data: responseData,
+  1189→        error: success ? undefined : responseData,
+  1190→        duration,
+  1191→      });
+  1192→
+  1193→      socket.emit('log', {
+  1194→        model, command,
+  1195→        status: success ? 'success' : 'error',
+  1196→        timestamp: new Date().toISOString(),
+  1197→      });
+  1198→
+  1199→      // Update cached position for telemetry
+  1200→      if (command === 'POS') {
+  1201→        const azMatch = responseData.match(/AZ:([-\d.]+)/);
+  1202→        const elMatch = responseData.match(/EL:([-\d.]+)/);
+  1203→        if (azMatch) device.azimuth = parseFloat(azMatch[1]);
+  1204→        if (elMatch) device.elevation = parseFloat(elMatch[1]);
+  1205→      }
+  1206→
+  1207→    } catch (err: any) {
+  1208→      const duration = Date.now() - t0;
+  1209→      socket.emit('command-response', {
+  1210→        model, command, success: false,
+  1211→        error: err.message || 'Unknown error',
+  1212→        duration,
+  1213→      });
+  1214→      socket.emit('log', {
+  1215→        model, command,
+  1216→        status: 'error',
+  1217→        timestamp: new Date().toISOString(),
+  1218→      });
+  1219→    }
+  1220→  });
+  1221→
+  1222→  // Telemetry request
+  1223→  socket.on('telemetry-request', async (data: { model: string }) => {
+  1224→    const { model } = data;
+  1225→    const device = getDevice(model);
+  1226→
+  1227→    if (!device || !isDeviceConnected(device)) {
+  1228→      socket.emit('telemetry', {
+  1229→        model,
+  1230→        azimuth: null,
+  1231→        elevation: null,
+  1232→        speed: device?.speed || 0,
+  1233→        status: 'disconnected',
+  1234→        connected: false,
+  1235→      });
+  1236→      return;
+  1237→    }
+  1238→
+  1239→    try {
+  1240→      const posResponse = await sendTcpCommand(device.tiltSocket!, 'POS');
+  1241→      let staResponse = '';
+  1242→      try {
+  1243→        staResponse = await sendTcpCommand(device.tiltSocket!, 'STA');
+  1244→      } catch {
+  1245→        // Status might not be supported by all devices
+  1246→      }
+  1247→
+  1248→      const azMatch = posResponse.match(/AZ:([-\d.]+)/);
+  1249→      const elMatch = posResponse.match(/EL:([-\d.]+)/);
+  1250→      const az = azMatch ? parseFloat(azMatch[1]) : device.azimuth;
+  1251→      const el = elMatch ? parseFloat(elMatch[1]) : device.elevation;
+  1252→
+  1253→      device.azimuth = az;
+  1254→      device.elevation = el;
+  1255→
+  1256→      // Parse speed from STA if available
+  1257→      const spdMatch = staResponse.match(/SPD:(\d+)/);
+  1258→      if (spdMatch) device.speed = parseInt(spdMatch[1]);
+  1259→
+  1260→      // Determine movement status from STA
+  1261→      const stMatch = staResponse.match(/ST:(\S+)/);
+  1262→      const statusStr = stMatch ? stMatch[1] : 'Idle';
+  1263→      const displayStatus = statusStr === 'IDLE' ? 'Idle' : (statusStr === 'MOVING' ? 'Moving' : statusStr);
+  1264→
+  1265→      socket.emit('telemetry', {
+  1266→        model,
+  1267→        azimuth: az,
+  1268→        elevation: el,
+  1269→        speed: device.speed,
+  1270→        status: displayStatus,
+  1271→        connected: true,
+  1272→      });
+  1273→
+  1274→    } catch (err: any) {
+  1275→      socket.emit('telemetry', {
+  1276→        model,
+  1277→        azimuth: device.azimuth,
+  1278→        elevation: device.elevation,
+  1279→        speed: device.speed,
+  1280→        status: `Error: ${err.message}`,
+  1281→        connected: false,
+  1282→      });
+  1283→    }
+  1284→  });
+  1285→
+  1286→  // Move (D-pad style)
+  1287→  socket.on('move', async (data: { model: string; direction: string; speed?: number }) => {
+  1288→    const { model, direction, speed } = data;
+  1289→    const t0 = Date.now();
+  1290→
+  1291→    const device = getDevice(model);
+  1292→    if (!device || !isDeviceConnected(device)) {
+  1293→      socket.emit('command-response', {
+  1294→        model, command: `MOVE ${direction}`, success: false,
+  1295→        error: `Device ${model} not connected`,
+  1296→        duration: Date.now() - t0,
+  1297→      });
+  1298→      return;
+  1299→    }
+  1300→
+  1301→    // Set speed first if provided
+  1302→    if (speed && speed !== device.speed) {
+  1303→      try {
+  1304→        await routeCommandToDevice(device, 'SPD', String(speed));
+  1305→        device.speed = speed;
+  1306→      } catch {
+  1307→        // Non-critical
+  1308→      }
+  1309→    }
+  1310→
+  1311→    const cmd = DIRECTION_MAP[direction];
+  1312→    if (!cmd) {
+  1313→      socket.emit('command-response', {
+  1314→        model, command: `MOVE ${direction}`, success: false,
+  1315→        error: `Unknown direction: ${direction}`,
+  1316→        duration: Date.now() - t0,
+  1317→      });
+  1318→      return;
+  1319→    }
+  1320→
+  1321→    try {
+  1322→      const responseData = await routeCommandToDevice(device, cmd);
+  1323→      const duration = Date.now() - t0;
+  1324→      const success = !responseData.startsWith('ERR');
+  1325→      socket.emit('command-response', {
+  1326→        model, command: `MOVE ${direction}`, success,
+  1327→        data: responseData,
+  1328→        error: success ? undefined : responseData,
+  1329→        duration,
+  1330→      });
+  1331→    } catch (err: any) {
+  1332→      socket.emit('command-response', {
+  1333→        model, command: `MOVE ${direction}`, success: false,
+  1334→        error: err.message,
+  1335→        duration: Date.now() - t0,
+  1336→      });
+  1337→    }
+  1338→  });
+  1339→
+  1340→  // Set speed
+  1341→  socket.on('set-speed', async (data: { model: string; speed: number }) => {
+  1342→    const { model, speed } = data;
+  1343→    const t0 = Date.now();
+  1344→
+  1345→    const device = getDevice(model);
+  1346→    if (!device || !isDeviceConnected(device)) {
+  1347→      socket.emit('command-response', {
+  1348→        model, command: 'SPD', success: false,
+  1349→        error: `Device ${model} not connected`,
+  1350→        duration: Date.now() - t0,
+  1351→      });
+  1352→      return;
+  1353→    }
+  1354→
+  1355→    try {
+  1356→      const responseData = await routeCommandToDevice(device, 'SPD', String(speed));
+  1357→      const duration = Date.now() - t0;
+  1358→      const success = !responseData.startsWith('ERR');
+  1359→      if (success) device.speed = speed;
+  1360→      socket.emit('command-response', {
+  1361→        model, command: 'SPD', success,
+  1362→        data: responseData,
+  1363→        error: success ? undefined : responseData,
+  1364→        duration,
+  1365→      });
+  1366→    } catch (err: any) {
+  1367→      socket.emit('command-response', {
+  1368→        model, command: 'SPD', success: false,
+  1369→        error: err.message,
+  1370→        duration: Date.now() - t0,
+  1371→      });
+  1372→    }
+  1373→  });
+  1374→
+  1375→  // Stop
+  1376→  socket.on('stop', async (data: { model: string }) => {
+  1377→    const { model } = data;
+  1378→    const t0 = Date.now();
+  1379→
+  1380→    const device = getDevice(model);
+  1381→    if (!device || !isDeviceConnected(device)) {
+  1382→      socket.emit('command-response', {
+  1383→        model, command: 'STP', success: false,
+  1384→        error: `Device ${model} not connected`,
+  1385→        duration: Date.now() - t0,
+  1386→      });
+  1387→      return;
+  1388→    }
+  1389→
+  1390→    try {
+  1391→      const responseData = await routeCommandToDevice(device, 'STP');
+  1392→      const duration = Date.now() - t0;
+  1393→      const success = !responseData.startsWith('ERR');
+  1394→      socket.emit('command-response', {
+  1395→        model, command: 'STP', success,
+  1396→        data: responseData,
+  1397→        error: success ? undefined : responseData,
+  1398→        duration,
+  1399→      });
+  1400→    } catch (err: any) {
+  1401→      socket.emit('command-response', {
+  1402→        model, command: 'STP', success: false,
+  1403→        error: err.message,
+  1404→        duration: Date.now() - t0,
+  1405→      });
+  1406→    }
+  1407→  });
+  1408→
+  1409→  // Recall preset
+  1410→  socket.on('recall-preset', async (data: { model: string; slot: number }) => {
+  1411→    const { model, slot } = data;
+  1412→    const t0 = Date.now();
+  1413→
+  1414→    const device = getDevice(model);
+  1415→    if (!device || !isDeviceConnected(device)) {
+  1416→      socket.emit('command-response', {
+  1417→        model, command: 'RPRS', success: false,
+  1418→        error: `Device ${model} not connected`,
+  1419→        duration: Date.now() - t0,
+  1420→      });
+  1421→      return;
+  1422→    }
+  1423→
+  1424→    try {
+  1425→      const responseData = await routeCommandToDevice(device, 'RPRS', String(slot));
+  1426→      const duration = Date.now() - t0;
+  1427→      const success = !responseData.startsWith('ERR');
+  1428→      socket.emit('command-response', {
+  1429→        model, command: `RPRS ${slot}`, success,
+  1430→        data: responseData,
+  1431→        error: success ? undefined : responseData,
+  1432→        duration,
+  1433→      });
+  1434→    } catch (err: any) {
+  1435→      socket.emit('command-response', {
+  1436→        model, command: `RPRS ${slot}`, success: false,
+  1437→        error: err.message,
+  1438→        duration: Date.now() - t0,
+  1439→      });
+  1440→    }
+  1441→  });
+  1442→
+  1443→  // Save preset
+  1444→  socket.on('save-preset', async (data: { model: string; slot: number }) => {
+  1445→    const { model, slot } = data;
+  1446→    const t0 = Date.now();
+  1447→
+  1448→    const device = getDevice(model);
+  1449→    if (!device || !isDeviceConnected(device)) {
+  1450→      socket.emit('command-response', {
+  1451→        model, command: 'SPRS', success: false,
+  1452→        error: `Device ${model} not connected`,
+  1453→        duration: Date.now() - t0,
+  1454→      });
+  1455→      return;
+  1456→    }
+  1457→
+  1458→    try {
+  1459→      const responseData = await routeCommandToDevice(device, 'SPRS', String(slot));
+  1460→      const duration = Date.now() - t0;
+  1461→      const success = !responseData.startsWith('ERR');
+  1462→      socket.emit('command-response', {
+  1463→        model, command: `SPRS ${slot}`, success,
+  1464→        data: responseData,
+  1465→        error: success ? undefined : responseData,
+  1466→        duration,
+  1467→      });
+  1468→    } catch (err: any) {
+  1469→      socket.emit('command-response', {
+  1470→        model, command: `SPRS ${slot}`, success: false,
+  1471→        error: err.message,
+  1472→        duration: Date.now() - t0,
+  1473→      });
+  1474→    }
+  1475→  });
+  1476→
+  1477→  // Go to position
+  1478→  socket.on('goto', async (data: { model: string; azimuth: number; elevation: number }) => {
+  1479→    const { model, azimuth, elevation } = data;
+  1480→    const t0 = Date.now();
+  1481→
+  1482→    const device = getDevice(model);
+  1483→    if (!device || !isDeviceConnected(device)) {
+  1484→      socket.emit('command-response', {
+  1485→        model, command: 'GOTO', success: false,
+  1486→        error: `Device ${model} not connected`,
+  1487→        duration: Date.now() - t0,
+  1488→      });
+  1489→      return;
+  1490→    }
+  1491→
+  1492→    try {
+  1493→      const value = `${azimuth},${elevation}`;
+  1494→      const responseData = await routeCommandToDevice(device, 'GOTO', value);
+  1495→      const duration = Date.now() - t0;
+  1496→      const success = !responseData.startsWith('ERR');
+  1497→      socket.emit('command-response', {
+  1498→        model, command: `GOTO ${value}`, success,
+  1499→        data: responseData,
+  1500→        error: success ? undefined : responseData,
+  1501→        duration,
+  1502→      });
+  1503→    } catch (err: any) {
+  1504→      socket.emit('command-response', {
+  1505→        model, command: 'GOTO', success: false,
+  1506→        error: err.message,
+  1507→        duration: Date.now() - t0,
+  1508→      });
+  1509→    }
+  1510→  });
+  1511→
+  1512→  // Home
+  1513→  socket.on('home', async (data: { model: string }) => {
+  1514→    const { model } = data;
+  1515→    const t0 = Date.now();
+  1516→
+  1517→    const device = getDevice(model);
+  1518→    if (!device || !isDeviceConnected(device)) {
+  1519→      socket.emit('command-response', {
+  1520→        model, command: 'HOM', success: false,
+  1521→        error: `Device ${model} not connected`,
+  1522→        duration: Date.now() - t0,
+  1523→      });
+  1524→      return;
+  1525→    }
+  1526→
+  1527→    try {
+  1528→      const responseData = await routeCommandToDevice(device, 'HOM');
+  1529→      const duration = Date.now() - t0;
+  1530→      const success = !responseData.startsWith('ERR');
+  1531→      socket.emit('command-response', {
+  1532→        model, command: 'HOM', success,
+  1533→        data: responseData,
+  1534→        error: success ? undefined : responseData,
+  1535→        duration,
+  1536→      });
+  1537→    } catch (err: any) {
+  1538→      socket.emit('command-response', {
+  1539→        model, command: 'HOM', success: false,
+  1540→        error: err.message,
+  1541→        duration: Date.now() - t0,
+  1542→      });
+  1543→    }
+  1544→  });
+  1545→
+  1546→  // Start swing
+  1547→  socket.on('start-swing', async (data: {
+  1548→    model: string;
+  1549→    startAz: number;
+  1550→    endAz: number;
+  1551→    startEl: number;
+  1552→    endEl: number;
+  1553→    speed: number;
+  1554→    cycleCount?: number;
+  1555→  }) => {
+  1556→    const { model, startAz, endAz, startEl, endEl, speed, cycleCount } = data;
+  1557→    const t0 = Date.now();
+  1558→
+  1559→    const device = getDevice(model);
+  1560→    if (!device || !isDeviceConnected(device)) {
+  1561→      socket.emit('command-response', {
+  1562→        model, command: 'SSWG', success: false,
+  1563→        error: `Device ${model} not connected`,
+  1564→        duration: Date.now() - t0,
+  1565→      });
+  1566→      return;
+  1567→    }
+  1568→
+  1569→    try {
+  1570→      const value = `${startAz} ${endAz} ${startEl} ${endEl} ${speed}${cycleCount != null ? ` ${cycleCount}` : ''}`;
+  1571→      const responseData = await routeCommandToDevice(device, 'SSWG', value);
+  1572→      const duration = Date.now() - t0;
+  1573→      const success = !responseData.startsWith('ERR');
+  1574→      socket.emit('command-response', {
+  1575→        model, command: 'SSWG', success,
+  1576→        data: responseData,
+  1577→        error: success ? undefined : responseData,
+  1578→        duration,
+  1579→      });
+  1580→    } catch (err: any) {
+  1581→      socket.emit('command-response', {
+  1582→        model, command: 'SSWG', success: false,
+  1583→        error: err.message,
+  1584→        duration: Date.now() - t0,
+  1585→      });
+  1586→    }
+  1587→  });
+  1588→
+  1589→  // Stop swing
+  1590→  socket.on('stop-swing', async (data: { model: string }) => {
+  1591→    const { model } = data;
+  1592→    const t0 = Date.now();
+  1593→
+  1594→    const device = getDevice(model);
+  1595→    if (!device || !isDeviceConnected(device)) {
+  1596→      socket.emit('command-response', {
+  1597→        model, command: 'ESWG', success: false,
+  1598→        error: `Device ${model} not connected`,
+  1599→        duration: Date.now() - t0,
+  1600→      });
+  1601→      return;
+  1602→    }
+  1603→
+  1604→    try {
+  1605→      const responseData = await routeCommandToDevice(device, 'ESWG');
+  1606→      const duration = Date.now() - t0;
+  1607→      const success = !responseData.startsWith('ERR');
+  1608→      socket.emit('command-response', {
+  1609→        model, command: 'ESWG', success,
+  1610→        data: responseData,
+  1611→        error: success ? undefined : responseData,
+  1612→        duration,
+  1613→      });
+  1614→    } catch (err: any) {
+  1615→      socket.emit('command-response', {
+  1616→        model, command: 'ESWG', success: false,
+  1617→        error: err.message,
+  1618→        duration: Date.now() - t0,
+  1619→      });
+  1620→    }
+  1621→  });
+  1622→
+  1623→  socket.on('disconnect', () => {
+  1624→    console.log(`[Bridge] Socket.IO client disconnected: ${socket.id}`);
+  1625→  });
+  1626→
+  1627→  socket.on('error', (error) => {
+  1628→    console.error(`[Bridge] Socket.IO error (${socket.id}):`, error);
+  1629→  });
+  1630→});
+  1631→
+  1632→// ─── Start Server ────────────────────────────────────────────────────────────
+  1633→
+  1634→httpServer.listen(PORT, () => {
+  1635→  console.log(`[Bridge] TechLaser Device Bridge running on port ${PORT}`);
+  1636→  console.log(`[Bridge] HTTP REST: http://localhost:${PORT}/health, http://localhost:${PORT}/command`);
+  1637→  console.log(`[Bridge] Socket.IO: ws://localhost:${PORT}/socket.io`);
+  1638→  console.log(`[Bridge] Mobile UI:  http://localhost:${PORT}/`);
+  1639→});
+  1640→
+  1641→// ─── Graceful Shutdown ───────────────────────────────────────────────────────
+  1642→
+  1643→function shutdown(signal: string) {
+  1644→  console.log(`[Bridge] Received ${signal}, shutting down...`);
+  1645→
+  1646→  for (const [model, device] of devices) {
+  1647→    console.log(`[Bridge] Closing TCP connections for ${model}...`);
+  1648→    destroyDeviceConnection(device);
+  1649→  }
+  1650→  devices.clear();
+  1651→
+  1652→  io.close(() => {
+  1653→    httpServer.close(() => {
+  1654→      console.log('[Bridge] Server closed');
+  1655→      process.exit(0);
+  1656→    });
+  1657→  });
+  1658→}
+  1659→
+  1660→process.on('SIGTERM', () => shutdown('SIGTERM'));
+  1661→process.on('SIGINT', () => shutdown('SIGINT'));
