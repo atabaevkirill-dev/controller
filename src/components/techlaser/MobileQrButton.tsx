@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Dialog,
@@ -10,24 +10,47 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Smartphone, Copy, Check, QrCode } from 'lucide-react';
+import { Smartphone, Copy, Check, QrCode, Loader2 } from 'lucide-react';
 
 export default function MobileQrButton() {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [mobileUrl, setMobileUrl] = useState('');
+  const fetchedRef = useRef(false);
 
-  const mobileUrl = useMemo(() => {
-    if (typeof window === 'undefined') return '';
-    return `${window.location.origin}/mobile`;
+  const fetchUrl = useCallback(() => {
+    fetch('/api/server-url')
+      .then((r) => r.json())
+      .then((data) => {
+        setMobileUrl(data.mobileUrl || '');
+      })
+      .catch(() => {
+        setMobileUrl(`${window.location.origin}/mobile`);
+      });
   }, []);
 
+  // Fetch URL when dialog opens (use ref to avoid re-fetching)
+  useEffect(() => {
+    if (open && !fetchedRef.current) {
+      fetchedRef.current = true;
+      fetchUrl();
+    }
+    // Reset when closed so next open re-fetches
+    if (!open) {
+      fetchedRef.current = false;
+    }
+  }, [open, fetchUrl]);
+
   const handleCopy = async () => {
+    if (!mobileUrl) return;
     try {
       await navigator.clipboard.writeText(mobileUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
   };
+
+  const loading = open && !mobileUrl;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -42,63 +65,70 @@ export default function MobileQrButton() {
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-sm p-0 gap-0 overflow-hidden">
+      <DialogContent className="sm:max-w-[340px] p-0 gap-0 overflow-hidden">
         {/* Top accent bar */}
-        <div className="h-1 bg-primary w-full" />
+        <div className="h-1 bg-primary w-full shrink-0" />
 
-        <div className="p-6 flex flex-col items-center gap-5">
-          <DialogHeader className="text-center">
-            <DialogTitle className="flex items-center justify-center gap-2 text-base">
-              <Smartphone className="w-4.5 h-4.5 text-primary" />
+        <div className="px-6 pt-5 pb-6 flex flex-col items-center gap-4">
+          <DialogHeader className="text-center space-y-0">
+            <DialogTitle className="flex items-center justify-center gap-2 text-sm font-semibold">
+              <Smartphone className="w-4 h-4 text-primary" />
               Управление с телефона
             </DialogTitle>
           </DialogHeader>
 
           {/* QR Code */}
-          <div className="relative p-4 bg-white rounded-2xl shadow-lg">
-            <QRCodeSVG
-              value={mobileUrl}
-              size={200}
-              level="M"
-              bgColor="#ffffff"
-              fgColor="#0a0a0a"
-              includeMargin={false}
-            />
-            {/* Corner accents */}
-            <div className="absolute top-0 left-0 w-5 h-5 border-t-2 border-l-2 border-primary rounded-tl-2xl" />
-            <div className="absolute top-0 right-0 w-5 h-5 border-t-2 border-r-2 border-primary rounded-tr-2xl" />
-            <div className="absolute bottom-0 left-0 w-5 h-5 border-b-2 border-l-2 border-primary rounded-bl-2xl" />
-            <div className="absolute bottom-0 right-0 w-5 h-5 border-b-2 border-r-2 border-primary rounded-br-2xl" />
-          </div>
+          {loading ? (
+            <div className="w-[200px] h-[200px] rounded-2xl bg-secondary flex items-center justify-center">
+              <Loader2 className="w-6 h-6 text-muted-foreground animate-spin" />
+            </div>
+          ) : mobileUrl ? (
+            <div className="relative p-3 bg-white rounded-2xl shadow-lg">
+              <QRCodeSVG
+                value={mobileUrl}
+                size={200}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#0a0a0a"
+                includeMargin={false}
+              />
+            </div>
+          ) : (
+            <div className="w-[200px] h-[200px] rounded-2xl bg-secondary flex items-center justify-center text-xs text-muted-foreground">
+              Ошибка загрузки
+            </div>
+          )}
 
           {/* Instructions */}
-          <div className="text-center space-y-2">
-            <p className="text-sm text-foreground font-medium">
+          <div className="text-center space-y-1">
+            <p className="text-xs text-foreground font-medium">
               Наведите камеру телефона на QR-код
             </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Откроется лёгкая страница с D-Pad и скоростью для управления ОПУ
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Откроется страница с D-Pad и скоростью
             </p>
           </div>
 
           {/* URL + Copy */}
-          <div className="w-full flex items-center gap-2 bg-secondary rounded-lg p-2">
-            <code className="flex-1 text-xs font-mono text-muted-foreground truncate px-2">
-              {mobileUrl}
-            </code>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 shrink-0"
-              onClick={handleCopy}
-            >
-              {copied ? (
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-              ) : (
-                <Copy className="w-3.5 h-3.5" />
-              )}
-            </Button>
-          </div>
+          {mobileUrl && (
+            <div className="w-full flex items-center gap-2 bg-secondary/80 rounded-lg p-1.5">
+              <code className="flex-1 text-[11px] font-mono text-muted-foreground truncate px-2">
+                {mobileUrl}
+              </code>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 shrink-0"
+                onClick={handleCopy}
+              >
+                {copied ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

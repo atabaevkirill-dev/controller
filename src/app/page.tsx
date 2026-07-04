@@ -18,7 +18,7 @@ import MobileQrButton from '@/components/techlaser/MobileQrButton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Crosshair, Settings, Bookmark, Terminal, Gamepad2, Zap, SlidersHorizontal, Smartphone, Wifi } from 'lucide-react';
+import { Crosshair, Settings, Bookmark, Terminal, Gamepad2, Zap, SlidersHorizontal, Smartphone, Wifi, Navigation, Waves } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 async function sendCommand(device: string, command: string, value?: string) {
@@ -264,8 +264,8 @@ export default function TechLaserController() {
             </MobileExpandableSection>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_320px] gap-4">
-            {/* Left Column */}
+          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+            {/* Left Column — Controls */}
             <div className="space-y-4">
               <Card className="bg-card border-border">
                 <CardContent className="py-5 flex flex-col items-center gap-4">
@@ -277,38 +277,40 @@ export default function TechLaserController() {
               <JoystickStatus />
             </div>
 
-            {/* Center Column */}
+            {/* Right Column — Telemetry + Tabs */}
             <div className="space-y-4">
               <Telemetry />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <PositionControl />
-                <SwingControl />
-              </div>
-            </div>
-
-            {/* Right Column */}
-            <div className="space-y-4">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="w-full grid grid-cols-4 h-9">
-                  <TabsTrigger value="presets" className="text-xs gap-1.5">
+                <TabsList className="w-full grid grid-cols-6 h-9">
+                  <TabsTrigger value="presets" className="text-xs gap-1">
                     <Bookmark className="w-3.5 h-3.5" />
                     <span className="hidden xl:inline">Пресеты</span>
                   </TabsTrigger>
-                  <TabsTrigger value="extended" className="text-xs gap-1.5">
+                  <TabsTrigger value="position" className="text-xs gap-1">
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span className="hidden xl:inline">Позиция</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="swing" className="text-xs gap-1">
+                    <Waves className="w-3.5 h-3.5" />
+                    <span className="hidden xl:inline">Качание</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="extended" className="text-xs gap-1">
                     <SlidersHorizontal className="w-3.5 h-3.5" />
                     <span className="hidden xl:inline">Протокол</span>
                   </TabsTrigger>
-                  <TabsTrigger value="settings" className="text-xs gap-1.5">
+                  <TabsTrigger value="settings" className="text-xs gap-1">
                     <Settings className="w-3.5 h-3.5" />
                     <span className="hidden xl:inline">Сеть</span>
                   </TabsTrigger>
-                  <TabsTrigger value="diagnostics" className="text-xs gap-1.5">
+                  <TabsTrigger value="diagnostics" className="text-xs gap-1">
                     <Terminal className="w-3.5 h-3.5" />
                     <span className="hidden xl:inline">Лог</span>
                   </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="presets" className="mt-3"><Presets /></TabsContent>
+                <TabsContent value="position" className="mt-3"><PositionControl /></TabsContent>
+                <TabsContent value="swing" className="mt-3"><SwingControl /></TabsContent>
                 <TabsContent value="extended" className="mt-3"><ExtendedSettings /></TabsContent>
                 <TabsContent value="settings" className="mt-3"><ConnectionSettings /></TabsContent>
                 <TabsContent value="diagnostics" className="mt-3"><Diagnostics /></TabsContent>
