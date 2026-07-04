@@ -19,11 +19,12 @@ async function sendCommand(device: string, command: string, value?: string) {
 }
 
 export default function ConnectionSettings() {
-  const { activeDevice, connectionStatus, setConnectionStatus } = useDeviceStore();
+  const { activeDevice, connectionStatus, setConnectionStatus, setConnectionError } = useDeviceStore();
   const [config, setConfig] = useState<DeviceConnectionConfig>(DEFAULT_DEVICE_CONFIGS[activeDevice].config);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<'ok' | 'fail' | null>(null);
+  const [connecting, setConnecting] = useState(false);
 
   const isDualAxis = activeDevice === 'TL.0400';
 
@@ -59,23 +60,41 @@ export default function ConnectionSettings() {
   }, [isDualAxis]);
 
   const handleConnect = async () => {
+    setConnecting(true);
     setConnectionStatus('connecting');
+    setConnectionError(null);
+    setTestResult(null);
     try {
       const res = await fetch('/api/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device: activeDevice, command: 'CONNECT', value: JSON.stringify(config) }),
+        body: JSON.stringify({
+          device: activeDevice,
+          command: 'CONNECT',
+          value: JSON.stringify(config),
+        }),
       });
       const data = await res.json();
-      setConnectionStatus(data?.success ? 'connected' : 'error');
-    } catch {
+      if (data?.success) {
+        setConnectionStatus('connected');
+        setTestResult('ok');
+      } else {
+        setConnectionStatus('error');
+        setConnectionError(data?.error || 'Ошибка подключения');
+        setTestResult('fail');
+      }
+    } catch (err: any) {
       setConnectionStatus('error');
+      setConnectionError(err.message || 'Сетевая ошибка');
+      setTestResult('fail');
     }
+    setConnecting(false);
   };
 
   const handleDisconnect = async () => {
-    setConnectionStatus('disconnected');
     await sendCommand(activeDevice, 'DISCONNECT');
+    setConnectionStatus('disconnected');
+    setConnectionError(null);
   };
 
   const handleTest = async () => {
@@ -85,7 +104,7 @@ export default function ConnectionSettings() {
       const res = await fetch('/api/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device: activeDevice, command: 'PING', value: config.tiltIp }),
+        body: JSON.stringify({ device: activeDevice, command: 'PNG' }),
       });
       const data = await res.json();
       setTestResult(data?.success ? 'ok' : 'fail');
@@ -132,7 +151,6 @@ export default function ConnectionSettings() {
         <div className="space-y-3">
           {isDualAxis ? (
             <>
-              {/* Tilt axis */}
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground uppercase tracking-wider">Tilt (Наклон)</Label>
                 <div className="flex gap-2">
@@ -151,7 +169,6 @@ export default function ConnectionSettings() {
                   />
                 </div>
               </div>
-              {/* Pan axis */}
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground uppercase tracking-wider">Pan (Поворот)</Label>
                 <div className="flex gap-2">
@@ -207,12 +224,12 @@ export default function ConnectionSettings() {
               Отключить
             </Button>
           ) : (
-            <Button size="sm" className="h-8 text-xs" onClick={handleConnect}>
+            <Button size="sm" className="h-8 text-xs" onClick={handleConnect} disabled={connecting}>
               <Zap className="w-3.5 h-3.5 mr-1.5" />
-              Подключить
+              {connecting ? 'Подключение...' : 'Подключить'}
             </Button>
           )}
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleTest} disabled={testing}>
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleTest} disabled={testing || connectionStatus !== 'connected'}>
             <Zap className="w-3.5 h-3.5 mr-1.5" />
             Тест
           </Button>

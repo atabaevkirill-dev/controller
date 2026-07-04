@@ -19,6 +19,7 @@ model DeviceConfig {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   presets     Preset[]
+  extendedSettings ExtendedSettings?
 }
 
 model Preset {
@@ -46,4 +47,42 @@ model CommandLog {
   status    String   @default("pending") // pending, success, error, timeout
   duration  Int?
   createdAt DateTime @default(now())
+}
+
+model ExtendedSettings {
+  id        String   @id @default(cuid())
+  model     String   @unique // TL.0009, TL.0250, TL.0320, TL.0400
+  // Base settings (all models)
+  speedMode        String   @default("linear")
+  acceleration     Float    @default(20)
+  deceleration     Float    @default(20)
+  deadZone         Float    @default(0.05)
+  azMin            Float    @default(-180)
+  azMax            Float    @default(180)
+  elMin            Float    @default(-10)
+  elMax            Float    @default(90)
+  autoParkTimeout  Int      @default(0)
+  backlashComp     Float    @default(0.1)
+  // Mid+ settings (TL.0250+)
+  tempWarning      Float?   @default(60)
+  tempShutdown     Float?   @default(75)
+  errorRecovery    String?  @default("none")
+  posReportInterval Int?    @default(200)
+  // Advanced settings (TL.0320+)
+  velocityFeedback Boolean? @default(false)
+  inertialDamping  Float?   @default(0.3)
+  motorCurrentLimit Float?  @default(80)
+  // TL.0400 dual axis
+  tiltSpeedMode    String?  @default("s-curve")
+  panSpeedMode     String?  @default("s-curve")
+  tiltAcceleration  Float?  @default(150)
+  panAcceleration   Float?  @default(120)
+  tiltDeceleration  Float?  @default(150)
+  panDeceleration   Float?  @default(120)
+  syncMode         String?  @default("independent")
+  syncRatio        Float?   @default(1.0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  device    DeviceConfig @relation(fields: [model], references: [model], onDelete: Cascade)
 }

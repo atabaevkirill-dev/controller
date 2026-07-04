@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { DeviceModel, ConnectionStatus, TelemetryData, Direction, PresetData, CommandLogEntry, SwingConfig } from '@/lib/device-types';
+import type { DeviceModel, ConnectionStatus, TelemetryData, Direction, PresetData, CommandLogEntry, SwingConfig, ExtendedSettings } from '@/lib/device-types';
 
 interface DeviceState {
   // Active device
@@ -9,6 +9,8 @@ interface DeviceState {
   // Connection
   connectionStatus: ConnectionStatus;
   setConnectionStatus: (status: ConnectionStatus) => void;
+  connectionError: string | null;
+  setConnectionError: (error: string | null) => void;
 
   // Movement
   currentDirection: Direction | null;
@@ -54,14 +56,33 @@ interface DeviceState {
   // Moving state
   isMoving: boolean;
   setIsMoving: (moving: boolean) => void;
+
+  // Extended settings
+  extendedSettings: ExtendedSettings | null;
+  setExtendedSettings: (settings: ExtendedSettings | null) => void;
+  extendedSettingsLoading: boolean;
+  setExtendedSettingsLoading: (loading: boolean) => void;
+
+  // WebSocket connection to device bridge (for mobile control)
+  bridgeConnected: boolean;
+  setBridgeConnected: (connected: boolean) => void;
 }
 
 export const useDeviceStore = create<DeviceState>((set) => ({
   activeDevice: 'TL.0009',
-  setActiveDevice: (model) => set({ activeDevice: model, connectionStatus: 'disconnected', currentDirection: null, telemetry: { azimuth: 0, elevation: 0, speed: 5, status: 'Idle' } }),
+  setActiveDevice: (model) => set({
+    activeDevice: model,
+    connectionStatus: 'disconnected',
+    connectionError: null,
+    currentDirection: null,
+    telemetry: { azimuth: 0, elevation: 0, speed: 0, status: 'Disconnected' },
+    extendedSettings: null,
+  }),
 
   connectionStatus: 'disconnected',
-  setConnectionStatus: (status) => set({ connectionStatus: status }),
+  setConnectionStatus: (status) => set({ connectionStatus: status, connectionError: status === 'error' ? 'Ошибка подключения' : null }),
+  connectionError: null,
+  setConnectionError: (error) => set({ connectionError: error }),
 
   currentDirection: null,
   setCurrentDirection: (dir) => set({ currentDirection: dir, isMoving: dir !== 'stop' && dir !== null }),
@@ -69,7 +90,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   speed: 5,
   setSpeed: (speed) => set({ speed: Math.max(1, Math.min(10, speed)) }),
 
-  telemetry: { azimuth: 0, elevation: 0, speed: 5, status: 'Idle' },
+  telemetry: { azimuth: 0, elevation: 0, speed: 0, status: 'Disconnected' },
   setTelemetry: (data) => set((state) => ({ telemetry: { ...state.telemetry, ...data } })),
 
   presets: [],
@@ -97,4 +118,12 @@ export const useDeviceStore = create<DeviceState>((set) => ({
 
   isMoving: false,
   setIsMoving: (moving) => set({ isMoving: moving }),
+
+  extendedSettings: null,
+  setExtendedSettings: (settings) => set({ extendedSettings: settings }),
+  extendedSettingsLoading: false,
+  setExtendedSettingsLoading: (loading) => set({ extendedSettingsLoading: loading }),
+
+  bridgeConnected: false,
+  setBridgeConnected: (connected) => set({ bridgeConnected: connected }),
 }));

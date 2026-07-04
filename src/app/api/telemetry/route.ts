@@ -1,32 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOrCreateState, jitter } from '@/lib/simulation-state';
+import { getTcpManager } from '@/lib/tcp-manager';
+import type { DeviceModel } from '@/lib/device-types';
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const device = searchParams.get('device') || 'TL.0009';
+    const device = (searchParams.get('device') || 'TL.0009') as DeviceModel;
 
-    const state = getOrCreateState(device);
+    const tcp = getTcpManager();
 
-    const uptime = state.uptime + Math.floor((Date.now() % 100000) / 1000);
-    const temperature = 35 + Math.random() * 10 + (state.moving ? 2 : 0);
-    const voltage = 11.5 + Math.random() * 1.5;
+    if (!tcp.isConnected(device)) {
+      return NextResponse.json({
+        azimuth: 0,
+        elevation: 0,
+        speed: 0,
+        status: 'Disconnected',
+        connected: false,
+      });
+    }
 
-    const telemetry = {
-      azimuth: jitter(state.azimuth, 0.05),
-      elevation: jitter(state.elevation, 0.05),
-      speed: state.speed,
-      status: state.moving
-        ? state.moving === 'stop'
-          ? 'Idle'
-          : `Moving ${state.moving}`
-        : 'Idle',
-      temperature: parseFloat(temperature.toFixed(1)),
-      voltage: parseFloat(voltage.toFixed(2)),
-      uptime,
-    };
+    // Query real position from device
+    const posResponse = await tcp.sendCommand(device, 'POS');
+    let azimuth = 0;
+    let elevation = 0;
 
-    return NextResponse.json(telemetry);
+    if (!posResponse.startsWith('ERR')) {
+      const match = posResponse.match(/AZ[:\s]*([-\d.]+)\s*EL[:\s]*([-\d.]+)/i);
+      if (match) {
+        azimuth = parseFloat(match[1]);
+        elevation = parseFloat(match[2]);
+      }
+    }
+
+    // Query status
+    const statusResponse = await tcp.sendCommand(device, 'STA');
+    let status = 'Unknown';
+    let speed = 0;
+    if (!statusResponse.startsWith('ERR')) {
+      const spdMatch = statusResponse.match(/SPD[:\s]*(\d+)/i);
+      const stMatch = statusResponse.match(/ST[:\s]*(\w+)/i);
+      if (spdMatch) speed = parseInt(spdMatch[1], 10);
+      if (stMatch) status = stMatch[1] === 'IDLE' ? 'Idle' : `Moving ${stMatch[1]}`;
+    }
+
+    const tcpStatus = tcp.getStatus(device);
+
+    return NextResponse.json({
+      azimuth,
+      elevation,
+      speed,
+      status,
+      connected: true,
+      lastActivity: tcpStatus.lastActivity,
+    });
   } catch (error: any) {
     console.error('[API /telemetry GET]', error);
     return NextResponse.json(

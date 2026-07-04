@@ -8,3 +8,4 @@ export { default as SwingControl } from './SwingControl';
 export { default as Presets } from './Presets';
 export { default as Diagnostics } from './Diagnostics';
 export { default as JoystickStatus } from './JoystickStatus';
+export { default as ExtendedSettings } from './ExtendedSettings';

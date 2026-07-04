@@ -124,3 +124,68 @@ Work Log:
 Stage Summary:
 - All core interactions verified via agent-browser
 - Professional quality confirmed by VLM analysis
+
+---
+Task ID: 8
+Agent: main
+Task: Rewrite device-bridge mini-service — real TCP, no simulation, Socket.IO + HTTP REST + mobile UI
+
+Work Log:
+- Added `express` dependency to device-bridge package.json
+- Completely rewrote mini-services/device-bridge/index.ts (~580 lines)
+- Removed ALL simulation code (SimState, simulateCommand, simulateDelay, updateSimState, periodic telemetry broadcast)
+- Implemented real TCP connection manager using `net.Socket` (createConnection) with persistent connections
+- TCP protocol: text-based `CMD [VALUE]\r\n` with 3000ms command timeout, 5000ms connection timeout
+- Socket.IO WebSocket server on port 3002 with path `/socket.io` for mobile devices
+- All 15+ WebSocket event handlers implemented:
+  - connect-device, disconnect-device (real TCP connect/disconnect)
+  - command (generic command forwarding to TCP)
+  - telemetry-request (queries POS+STA from TCP device)
+  - move, set-speed, stop (mobile D-pad support with hold-to-move)
+  - recall-preset, save-preset, goto, home
+  - start-swing, stop-swing
+- HTTP REST API via Express:
+  - GET /health → status, uptime, per-device connection status
+  - POST /command → command forwarding with validation
+- TL.0400 dual-socket routing: diagonal commands (MUL/MUR/MDL/MDR), GOTO, SPD split across tilt+pan sockets
+- TCP socket keepalive (10s interval) and error/close handlers for auto-cleanup
+- Mobile HTML page served at GET / with:
+  - Dark industrial theme matching main app (emerald accent, monospace font)
+  - 4-device selector bar (TL.0009, TL.0250, TL.0320, TL.0400)
+  - Telemetry display (azimuth, elevation, status)
+  - 8-direction D-pad with touchstart/touchend hold-to-move (200ms repeat)
+  - Speed slider (1-10)
+  - Action buttons (Home, Ping, Preset 1, Preset 2)
+  - Connect/Disconnect toggle
+  - Command log with auto-scroll (max 30 entries)
+- Verified: service starts cleanly, health endpoint returns `{"status":"ok"}`, command validation rejects unknown commands, unconnected device returns proper 404 error
+
+Stage Summary:
+- Device bridge rewritten from scratch: real TCP only (zero simulation), port 3002
+- Socket.IO + HTTP REST + mobile HTML UI all functional
+- TL.0400 dual-axis command routing fully implemented
+
+---
+Task ID: 9
+Agent: main
+Task: Create ExtendedSettings component for device-specific protocol settings
+
+Work Log:
+- Created src/components/techlaser/ExtendedSettings.tsx (~370 lines)
+- Implemented full model info display at top (name, description, features badges, max speed)
+- Implemented Tabs layout: "Основные" tab for all models, "Двойная ось" tab for TL.0400 only
+- Numeric fields rendered from getSettingsFields() with Label + Input (font-mono) + unit label + Send icon button
+- Select fields for speedMode, errorRecovery, syncMode, tiltSpeedMode, panSpeedMode using shadcn Select
+- Position limits (azMin/azMax/elMin/elMax) in a 2×2 grid with dedicated "Отправить лимиты" button
+- Velocity feedback toggle (Switch) shown for TL.0320 and TL.0400
+- TL.0400 Dual Axis tab with Tilt/Pan sections (amber/emerald color coding), separate accel/decel/select fields
+- Optimistic updates: field change → local state → PUT save to DB → POST send to device (if connected)
+- "Отправить все" button sends ALL settings commands sequentially via getAllSettingsCommands()
+- "Сброс" button resets to DEFAULT_EXTENDED_SETTINGS and saves to DB
+- Flash feedback (green/red border) on field send for 1.5s
+- Loading skeleton state while fetching settings from API
+- All text in Russian, compact dark industrial theme, max-height scrollable settings area
+- ESLint passes with zero errors
+
+Stage Summary:
+- ExtendedSettings component complete with per-model field rendering, optimistic DB/device sync, dual-axis support, and professional dark industrial UI
