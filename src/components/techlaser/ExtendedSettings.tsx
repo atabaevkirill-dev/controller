@@ -29,6 +29,9 @@ export default function ExtendedSettings() {
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<FieldFeedback | null>(null);
   const [sendingAll, setSendingAll] = useState(false);
+  const [diagLoading, setDiagLoading] = useState<string | null>(null);
+  const [diagResults, setDiagResults] = useState<Record<string, boolean>>({});
+  const [diagResult, setDiagResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const modelInfo = getModelInfo(activeDevice);
   const fields = getSettingsFields(activeDevice);
@@ -213,6 +216,25 @@ export default function ExtendedSettings() {
   };
 
   // Send All
+  const handleDiag = async (cmd: string) => {
+    setDiagLoading(cmd);
+    setDiagResult(null);
+    try {
+      const res = await fetch(`/api/extended-settings/${activeDevice}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd }),
+      });
+      const data = await res.json();
+      const ok = !!data.success;
+      const text = data.data || data.error || 'Нет ответа';
+      setDiagResult({ ok, text });
+      setDiagResults((prev) => ({ ...prev, [cmd]: ok }));
+    } catch {
+      setDiagResult({ ok: false, text: 'Ошибка запроса' });
+    }
+    setDiagLoading(null);
+  };
+
   const handleSendAll = async () => {
     if (!settings || !isConnected) return;
     setSendingAll(true);
@@ -635,6 +657,45 @@ export default function ExtendedSettings() {
             </TabsContent>
           )}
         </Tabs>
+
+        <Separator className="my-3" />
+
+        {/* Self-Diagnostics Section */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+            <Shield className="w-3.5 h-3.5" />
+            Самодиагностика устройства
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {[
+              { cmd: 'DIAG', label: 'Тест моторов', icon: '⚙' },
+              { cmd: 'VER', label: 'Версия прошивки', icon: '🔧' },
+              { cmd: 'SN', label: 'Серийный номер', icon: '#️⃣' },
+              { cmd: 'HWINFO', label: 'Аппаратный статус', icon: '🖥' },
+              { cmd: 'ERRLOG', label: 'Журнал ошибок', icon: '⚠' },
+              { cmd: 'CLRERR', label: 'Сброс ошибок', icon: '🗑' },
+            ].map((item) => (
+              <button
+                key={item.cmd}
+                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-border text-[10px] font-mono
+                  transition-colors hover:bg-secondary/80 disabled:opacity-40
+                  ${diagLoading === item.cmd ? 'border-amber-500/50 text-amber-400' : diagResults[item.cmd] ? 'border-emerald-500/30 text-emerald-400' : ''}`}
+                disabled={!isConnected || diagLoading === item.cmd}
+                onClick={() => handleDiag(item.cmd)}
+              >
+                <span>{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {diagResult && (
+            <div className={`text-[10px] font-mono p-2 rounded-md border max-h-24 overflow-y-auto ${
+              diagResult.ok ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' : 'bg-red-500/5 border-red-500/20 text-red-400'
+            }`}>
+              {diagResult.text}
+            </div>
+          )}
+        </div>
 
         <Separator className="my-3" />
 

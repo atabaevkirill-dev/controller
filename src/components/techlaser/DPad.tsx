@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  Square,
-} from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Square } from 'lucide-react';
 import { useDeviceStore } from '@/store/device-store';
 import { PROTOCOL_COMMANDS, type Direction } from '@/lib/device-types';
 
@@ -22,51 +16,50 @@ const DIRECTIONS: { key: Direction; label: string; gridPos: string; icon: React.
 ];
 
 const DIR_TO_COMMAND: Record<string, string> = {
-  'up': PROTOCOL_COMMANDS.MOVE_UP,
-  'down': PROTOCOL_COMMANDS.MOVE_DOWN,
-  'left': PROTOCOL_COMMANDS.MOVE_LEFT,
-  'right': PROTOCOL_COMMANDS.MOVE_RIGHT,
-  'up-left': PROTOCOL_COMMANDS.MOVE_UP_LEFT,
-  'up-right': PROTOCOL_COMMANDS.MOVE_UP_RIGHT,
-  'down-left': PROTOCOL_COMMANDS.MOVE_DOWN_LEFT,
-  'down-right': PROTOCOL_COMMANDS.MOVE_DOWN_RIGHT,
+  'up': PROTOCOL_COMMANDS.MOVE_UP, 'down': PROTOCOL_COMMANDS.MOVE_DOWN,
+  'left': PROTOCOL_COMMANDS.MOVE_LEFT, 'right': PROTOCOL_COMMANDS.MOVE_RIGHT,
+  'up-left': PROTOCOL_COMMANDS.MOVE_UP_LEFT, 'up-right': PROTOCOL_COMMANDS.MOVE_UP_RIGHT,
+  'down-left': PROTOCOL_COMMANDS.MOVE_DOWN_LEFT, 'down-right': PROTOCOL_COMMANDS.MOVE_DOWN_RIGHT,
 };
 
 async function sendCommand(device: string, command: string, value?: string) {
   try {
     const res = await fetch('/api/command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ device, command, value }),
     });
     return res.json();
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 export default function DPad() {
-  const { activeDevice, currentDirection, setCurrentDirection, speed } = useDeviceStore();
+  const { activeDevice, currentDirection, setCurrentDirection, speed, connectionStatus } = useDeviceStore();
+  const isConnected = connectionStatus === 'connected';
 
   const handleStart = (direction: Direction) => {
     setCurrentDirection(direction);
-    const cmd = DIR_TO_COMMAND[direction];
-    if (cmd) {
-      sendCommand(activeDevice, cmd, String(speed));
+    if (isConnected) {
+      const cmd = DIR_TO_COMMAND[direction];
+      if (cmd) sendCommand(activeDevice, cmd, String(speed));
     }
   };
 
   const handleStop = () => {
     setCurrentDirection(null);
-    sendCommand(activeDevice, PROTOCOL_COMMANDS.STOP);
+    if (isConnected) sendCommand(activeDevice, PROTOCOL_COMMANDS.STOP);
   };
 
   return (
     <div className="flex flex-col items-center gap-3">
       <div
-        className="grid grid-cols-3 grid-rows-3 gap-1.5 w-[220px] h-[220px] sm:w-[220px] sm:h-[220px] w-[180px] h-[180px]"
+        className="grid grid-cols-3 grid-rows-3 gap-1.5 relative"
         style={{ width: 'clamp(180px, 30vw, 220px)', height: 'clamp(180px, 30vw, 220px)' }}
       >
+        {/* Connection ring glow behind the DPad */}
+        {isConnected && (
+          <div className="absolute inset-[-6px] rounded-2xl border border-emerald-500/20 pointer-events-none animate-fade-in-up" />
+        )}
+
         {DIRECTIONS.map(({ key, label, gridPos, icon }) => {
           const isActive = currentDirection === key;
           return (
@@ -75,8 +68,12 @@ export default function DPad() {
               className={`
                 dpad-btn rounded-lg flex items-center justify-center
                 bg-secondary text-secondary-foreground border border-border
-                hover:bg-primary hover:text-primary-foreground hover:border-primary
-                ${isActive ? 'glow-green bg-primary text-primary-foreground border-primary' : ''}
+                transition-all duration-100
+                ${!isConnected ? 'opacity-40' : ''}
+                ${isActive
+                  ? 'glow-green bg-emerald-600/30 border-emerald-500/70 text-emerald-300 scale-95'
+                  : 'hover:bg-primary/20 hover:border-primary/40 hover:text-primary-foreground'
+                }
                 ${gridPos}
               `}
               aria-label={label}
@@ -95,13 +92,16 @@ export default function DPad() {
 
         {/* Center STOP button */}
         <button
-          className="
+          className={`
             dpad-btn col-start-2 row-start-2 rounded-full
             flex items-center justify-center
-            bg-destructive text-destructive-foreground border-2 border-destructive
-            hover:bg-destructive/80
-            font-bold text-xs tracking-wider
-          "
+            border-2 font-bold text-xs tracking-wider
+            transition-all duration-100
+            ${!isConnected
+              ? 'bg-destructive/30 text-destructive/50 border-destructive/30'
+              : 'bg-destructive text-destructive-foreground border-destructive hover:bg-destructive/80 active:scale-90'
+            }
+          `}
           aria-label="СТОП"
           onMouseDown={handleStop}
           onTouchStart={(e) => { e.preventDefault(); handleStop(); }}
@@ -110,8 +110,8 @@ export default function DPad() {
         </button>
       </div>
 
-      <span className="text-xs text-muted-foreground font-mono uppercase tracking-widest">
-        D-Pad Контроллер
+      <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-[0.2em]">
+        D-Pad
       </span>
     </div>
   );

@@ -1,11 +1,7 @@
 'use client';
 
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { useDeviceStore } from '@/store/device-store';
 import { DEVICE_MODELS, DEFAULT_DEVICE_CONFIGS, type DeviceModel } from '@/lib/device-types';
@@ -22,7 +18,6 @@ export default function DeviceSelector() {
 
   const handleChange = (model: DeviceModel) => {
     setActiveDevice(model);
-    // Fetch presets for the new device
     fetch(`/api/presets?deviceId=${model}`)
       .then((res) => res.json())
       .then((data) => {
@@ -34,9 +29,9 @@ export default function DeviceSelector() {
 
   return (
     <div className="flex items-center gap-3">
-      <div className={`w-2.5 h-2.5 rounded-full ${STATUS_COLORS[connectionStatus] || 'bg-red-500'}`} />
+      <div className={`w-2.5 h-2.5 rounded-full transition-colors duration-300 ${STATUS_COLORS[connectionStatus] || 'bg-red-500'}`} />
       <Select value={activeDevice} onValueChange={handleChange}>
-        <SelectTrigger className="w-[200px] font-mono text-sm bg-secondary border-border">
+        <SelectTrigger className="w-[180px] sm:w-[200px] font-mono text-sm bg-secondary border-border">
           <SelectValue placeholder="Выберите устройство" />
         </SelectTrigger>
         <SelectContent>
@@ -47,7 +42,7 @@ export default function DeviceSelector() {
           ))}
         </SelectContent>
       </Select>
-      <span className="text-xs text-muted-foreground hidden sm:inline">
+      <span className="text-xs text-muted-foreground hidden sm:inline transition-colors duration-300">
         {connectionStatus === 'connected' ? 'Подключено' : connectionStatus === 'connecting' ? 'Подключение...' : connectionStatus === 'error' ? 'Ошибка' : 'Отключено'}
       </span>
     </div>

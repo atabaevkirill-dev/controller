@@ -189,3 +189,34 @@ Work Log:
 
 Stage Summary:
 - ExtendedSettings component complete with per-model field rendering, optimistic DB/device sync, dual-axis support, and professional dark industrial UI
+---
+Task ID: v1-v5
+Agent: main
+Task: UI overhaul — remove TechLaser, scanline, scrollbars; add visualizations and self-diagnostics
+
+Work Log:
+- Removed scanline CSS animation from globals.css (the "бегущая полоса")
+- Added global hidden scrollbar CSS (webkit + scrollbar-width: none)
+- Added new CSS animations: connect-pulse, radar-sweep, swing-oscillate, ring-glow, fade-in-up
+- Added glow-cyan effect class
+- Removed "TechLaser" from: layout.tsx metadata, page.tsx header/footer, DeviceSelector
+- Changed brand to "SaaS Controller"
+- Removed scanline-effect class from body in layout.tsx
+- Created SVG radar/compass visualization in PositionControl with animated position dot, target crosshair, degree markers, grid rings
+- Created SVG swing visualization in SwingControl with real-time animated sweep, trail, end markers
+- Added self-diagnostics section to ExtendedSettings (DIAG, VER, SN, HWINFO, ERRLOG, CLRERR buttons with results display)
+- Updated Telemetry: flash effect on value change, visual connection state with icons, larger font for AZ/EL
+- Updated DPad: connection ring glow, dimmed when disconnected, smooth transitions
+- Updated DeviceSelector: transition effects on status indicator
+- Updated page.tsx: connection animation overlay, bridge status indicator, removed all TechLaser references
+- Added diagnostic commands (DIAG, VER, SN, HWINFO, ERRLOG, CLRERR) to device-bridge VALID_COMMANDS
+
+Stage Summary:
+- All "TechLaser" references removed from UI (only remains in device model names/types which is correct)
+- Scanline/running bar completely removed
+- All scrollbars hidden globally
+- Cool radar visualization for positioning
+- Animated swing sweep visualization
+- Self-diagnostics in extended settings
+- Visual connection feedback throughout the app
+- Lint passes clean

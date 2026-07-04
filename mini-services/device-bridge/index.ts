@@ -19,6 +19,8 @@ const VALID_COMMANDS = new Set([
   // TL.0400 specific
   'SET_ACC_T', 'SET_ACC_P', 'SET_DEC_T', 'SET_DEC_P',
   'SET_LIM_T', 'SET_LIM_P', 'SET_SMODE_T', 'SET_SMODE_P',
+  // Self-diagnostics
+  'DIAG', 'VER', 'SN', 'HWINFO', 'ERRLOG', 'CLRERR',
 ]);
 
 // ─── Types ───────────────────────────────────────────────────────────────────

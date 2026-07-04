@@ -17,7 +17,7 @@ import ExtendedSettings from '@/components/techlaser/ExtendedSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Crosshair, Settings, Bookmark, Terminal, Gamepad2, Zap, SlidersHorizontal, Smartphone } from 'lucide-react';
+import { Crosshair, Settings, Bookmark, Terminal, Gamepad2, Zap, SlidersHorizontal, Smartphone, Wifi } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 async function sendCommand(device: string, command: string, value?: string) {
@@ -51,94 +51,72 @@ export default function TechLaserController() {
   const [activeTab, setActiveTab] = useState('presets');
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
+  const [connectAnim, setConnectAnim] = useState(false);
 
-  // Connect to device bridge via WebSocket for real-time updates
+  // Connect to device bridge via WebSocket
   useEffect(() => {
     let mounted = true;
-
     const connectBridge = () => {
       try {
         const ws = new WebSocket(`ws://${window.location.host}/?XTransformPort=3002`);
-
         ws.onopen = () => {
           if (!mounted) return;
-          console.log('[Bridge WS] Connected');
           setBridgeConnected(true);
         };
-
         ws.onmessage = (event) => {
           if (!mounted) return;
           try {
             const data = JSON.parse(event.data);
-
-            // Handle Socket.IO-like JSON protocol
             if (data.type === 'telemetry' && data.model === activeDevice) {
               useDeviceStore.getState().setTelemetry({
-                azimuth: data.azimuth,
-                elevation: data.elevation,
-                speed: data.speed,
-                status: data.status,
+                azimuth: data.azimuth, elevation: data.elevation,
+                speed: data.speed, status: data.status,
               });
             }
-
             if (data.type === 'device-status' && data.model === activeDevice) {
               setConnectionStatus(data.status === 'connected' ? 'connected' : 'disconnected');
               if (data.status === 'error') setConnectionError(data.message);
             }
-
             if (data.type === 'log' && data.model === activeDevice) {
               addCommandLog({
-                id: `${Date.now()}-${Math.random()}`,
-                deviceId: data.model,
-                command: data.command,
-                status: data.status === 'success' ? 'success' : 'error',
+                id: `${Date.now()}-${Math.random()}`, deviceId: data.model,
+                command: data.command, status: data.status === 'success' ? 'success' : 'error',
                 createdAt: data.timestamp || new Date().toISOString(),
               });
             }
           } catch {}
         };
-
         ws.onclose = () => {
           if (!mounted) return;
           setBridgeConnected(false);
           wsRef.current = null;
-          // Reconnect after 3s
           reconnectTimer.current = setTimeout(connectBridge, 3000);
         };
-
-        ws.onerror = () => {
-          // Silently handle - onclose will fire
-        };
-
+        ws.onerror = () => {};
         wsRef.current = ws;
       } catch {}
     };
-
     connectBridge();
-
     return () => {
       mounted = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
     };
   }, []);
 
-  // Handle device connection/disconnection via API
   const handleConnect = useCallback(async () => {
     setConnectionStatus('connecting');
     setConnectionError(null);
+    setConnectAnim(true);
     const result = await sendCommand(activeDevice, 'CONNECT');
     if (result?.success) {
       setConnectionStatus('connected');
+      setTimeout(() => setConnectAnim(false), 1500);
     } else {
       setConnectionStatus('error');
       setConnectionError(result?.error || 'Не удалось подключиться');
+      setConnectAnim(false);
     }
-    // Seed devices in DB
     fetch('/api/devices').catch(() => {});
   }, [activeDevice, setConnectionStatus, setConnectionError]);
 
@@ -148,22 +126,24 @@ export default function TechLaserController() {
     setConnectionError(null);
   }, [activeDevice, setConnectionStatus, setConnectionError]);
 
-  // Log commands from the DPad
-  const lastCmdCount = commandLog.length;
+  const connColor = connectionStatus === 'connected' ? 'text-emerald-400' : connectionStatus === 'connecting' ? 'text-amber-400' : 'text-red-400/60';
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
       <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-40">
         <div className="max-w-[1600px] mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3">
-          {/* Logo & Title */}
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
-              <Crosshair className="w-4.5 h-4.5 text-primary" />
+            <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-all duration-500 ${
+              connectionStatus === 'connected' ? 'bg-emerald-500/20 border-emerald-500/50' : 'bg-secondary border-border'
+            }`}>
+              <Crosshair className={`w-4.5 h-4.5 transition-colors duration-500 ${
+                connectionStatus === 'connected' ? 'text-emerald-400' : 'text-muted-foreground'
+              }`} />
             </div>
             <div className="min-w-0">
               <h1 className="text-sm sm:text-base font-bold tracking-tight truncate">
-                TechLaser <span className="text-primary">Controller</span>
+                SaaS <span className="text-primary">Controller</span>
               </h1>
               <p className="text-[10px] text-muted-foreground hidden sm:block tracking-wide">
                 Система управления ОПУ
@@ -171,23 +151,18 @@ export default function TechLaserController() {
             </div>
           </div>
 
-          {/* Device Selector + Connect */}
           <div className="flex items-center gap-2 sm:gap-3">
             <DeviceSelector />
             {!isMobile && (
               <Button
                 size="sm"
                 variant={connectionStatus === 'connected' ? 'outline' : 'default'}
-                className="h-8 text-xs gap-1.5"
-                onClick={() => {
-                  if (connectionStatus === 'connected') {
-                    handleDisconnect();
-                  } else {
-                    handleConnect();
-                  }
-                }}
+                className={`h-8 text-xs gap-1.5 transition-all duration-300 ${
+                  connectionStatus === 'connected' ? 'border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10' : ''
+                }`}
+                onClick={() => connectionStatus === 'connected' ? handleDisconnect() : handleConnect()}
               >
-                <Zap className="w-3.5 h-3.5" />
+                <Wifi className={`w-3.5 h-3.5 transition-colors ${connColor}`} />
                 {connectionStatus === 'connected' ? 'Откл.' : 'Подкл.'}
               </Button>
             )}
@@ -195,22 +170,33 @@ export default function TechLaserController() {
         </div>
       </header>
 
+      {/* Connection animation overlay */}
+      {connectAnim && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm pointer-events-none">
+          <div className="relative">
+            <div className={`w-16 h-16 rounded-full border-2 ${connectionStatus === 'connected' ? 'border-emerald-500' : 'border-amber-500'}`} />
+            <div className={`absolute inset-0 rounded-full border-2 animate-ping ${
+              connectionStatus === 'connected' ? 'border-emerald-500' : 'border-amber-500'
+            }`} style={{ animationDuration: '1s' }} />
+            <Crosshair className="absolute inset-0 m-auto w-6 h-6 text-emerald-400" />
+          </div>
+        </div>
+      )}
+
       {/* Connection Error Banner */}
       {connectionStatus === 'error' && useDeviceStore.getState().connectionError && (
-        <div className="bg-destructive/10 border-b border-destructive/30 px-4 py-2 text-xs text-destructive font-mono">
+        <div className="bg-destructive/10 border-b border-destructive/30 px-4 py-2 text-xs text-destructive font-mono animate-fade-in-up">
           ⚠ {useDeviceStore.getState().connectionError}
         </div>
       )}
 
       {/* Main Content */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-3 sm:px-4 py-3 sm:py-4">
-        {/* Mobile Layout */}
         {isMobile ? (
           <div className="space-y-4">
-            {/* Mobile: Connection status */}
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${connectionStatus === 'connected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                <span className={`w-2 h-2 rounded-full transition-colors ${connectionStatus === 'connected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
                 <span className="text-xs text-muted-foreground font-mono">{activeDevice}</span>
                 {bridgeConnected && (
                   <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
@@ -218,27 +204,21 @@ export default function TechLaserController() {
                   </span>
                 )}
               </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant={connectionStatus === 'connected' ? 'destructive' : 'default'}
-                  className="h-7 text-[10px]"
-                  onClick={() => connectionStatus === 'connected' ? handleDisconnect() : handleConnect()}
-                >
-                  {connectionStatus === 'connected' ? 'Откл.' : 'Подкл.'}
-                </Button>
-              </div>
+              <Button
+                size="sm"
+                variant={connectionStatus === 'connected' ? 'destructive' : 'default'}
+                className="h-7 text-[10px]"
+                onClick={() => connectionStatus === 'connected' ? handleDisconnect() : handleConnect()}
+              >
+                {connectionStatus === 'connected' ? 'Откл.' : 'Подкл.'}
+              </Button>
             </div>
 
-            {/* Mobile: D-Pad + Speed in a row */}
             <div className="flex items-start justify-center gap-4">
               <DPad />
-              <div className="pt-2 w-28">
-                <SpeedSlider />
-              </div>
+              <div className="pt-2 w-28"><SpeedSlider /></div>
             </div>
 
-            {/* Mobile: Quick Telemetry */}
             <Card className="bg-card border-border">
               <CardContent className="py-3 px-4">
                 <div className="flex items-center justify-around text-center">
@@ -260,10 +240,8 @@ export default function TechLaserController() {
               </CardContent>
             </Card>
 
-            {/* Mobile: Presets */}
             <Presets />
 
-            {/* Mobile: Expandable Sections */}
             <MobileExpandableSection title="Управление" icon={<Crosshair className="w-4 h-4" />}>
               <div className="space-y-3">
                 <PositionControl />
@@ -284,9 +262,8 @@ export default function TechLaserController() {
             </MobileExpandableSection>
           </div>
         ) : (
-          /* Desktop Layout: 3-column grid */
           <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_320px] gap-4">
-            {/* Left Column: D-Pad + Speed + Joystick */}
+            {/* Left Column */}
             <div className="space-y-4">
               <Card className="bg-card border-border">
                 <CardContent className="py-5 flex flex-col items-center gap-4">
@@ -295,11 +272,10 @@ export default function TechLaserController() {
                   <SpeedSlider />
                 </CardContent>
               </Card>
-
               <JoystickStatus />
             </div>
 
-            {/* Center Column: Telemetry + Position + Swing */}
+            {/* Center Column */}
             <div className="space-y-4">
               <Telemetry />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -308,7 +284,7 @@ export default function TechLaserController() {
               </div>
             </div>
 
-            {/* Right Column: Tabs (Presets, Settings, Extended, Diagnostics) */}
+            {/* Right Column */}
             <div className="space-y-4">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="w-full grid grid-cols-4 h-9">
@@ -330,21 +306,10 @@ export default function TechLaserController() {
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="presets" className="mt-3">
-                  <Presets />
-                </TabsContent>
-
-                <TabsContent value="extended" className="mt-3">
-                  <ExtendedSettings />
-                </TabsContent>
-
-                <TabsContent value="settings" className="mt-3">
-                  <ConnectionSettings />
-                </TabsContent>
-
-                <TabsContent value="diagnostics" className="mt-3">
-                  <Diagnostics />
-                </TabsContent>
+                <TabsContent value="presets" className="mt-3"><Presets /></TabsContent>
+                <TabsContent value="extended" className="mt-3"><ExtendedSettings /></TabsContent>
+                <TabsContent value="settings" className="mt-3"><ConnectionSettings /></TabsContent>
+                <TabsContent value="diagnostics" className="mt-3"><Diagnostics /></TabsContent>
               </Tabs>
             </div>
           </div>
@@ -357,35 +322,27 @@ export default function TechLaserController() {
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5">
               <Crosshair className="w-3 h-3" />
-              TechLaser SaaS Controller v2.0
+              SaaS Controller v2.0
             </span>
             <span className="hidden sm:inline">|</span>
-            <span className="hidden sm:flex items-center gap-1.5">
+            <span className={`hidden sm:flex items-center gap-1.5 transition-colors duration-300 ${connColor}`}>
               <Zap className="w-3 h-3" />
-              {connectionStatus === 'connected' ? (
-                <span className="text-emerald-400">Подключено</span>
-              ) : connectionStatus === 'connecting' ? (
-                <span className="text-amber-400">Подключение...</span>
-              ) : (
-                <span className="text-red-400">Отключено</span>
-              )}
+              {connectionStatus === 'connected' ? 'Подключено' : connectionStatus === 'connecting' ? 'Подключение...' : 'Отключено'}
             </span>
           </div>
           <div className="flex items-center gap-3">
             {bridgeConnected && (
               <span className="flex items-center gap-1 text-emerald-400">
-                <Smartphone className="w-3 h-3" />
-                Bridge
+                <Smartphone className="w-3 h-3" /> Bridge
               </span>
             )}
             {joystickConnected && (
               <span className="flex items-center gap-1 text-emerald-400">
-                <Gamepad2 className="w-3 h-3" />
-                Gamepad
+                <Gamepad2 className="w-3 h-3" /> Gamepad
               </span>
             )}
             <span className="flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${connectionStatus === 'connected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${connectionStatus === 'connected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
               {activeDevice}
             </span>
           </div>
@@ -395,17 +352,10 @@ export default function TechLaserController() {
   );
 }
 
-/* Mobile Expandable Section */
 function MobileExpandableSection({
-  title,
-  icon,
-  badge,
-  children,
+  title, icon, badge, children,
 }: {
-  title: string;
-  icon: React.ReactNode;
-  badge?: number;
-  children: React.ReactNode;
+  title: string; icon: React.ReactNode; badge?: number; children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -418,14 +368,12 @@ function MobileExpandableSection({
           {icon}
           {title}
           {badge !== undefined && badge > 0 && (
-            <span className="text-[10px] bg-secondary px-1.5 py-0.5 rounded-full font-mono">
-              {badge}
-            </span>
+            <span className="text-[10px] bg-secondary px-1.5 py-0.5 rounded-full font-mono">{badge}</span>
           )}
         </span>
-        <span className={`text-xs transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
+        <span className={`text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
-      {open && <div className="mt-1">{children}</div>}
+      {open && <div className="mt-1 animate-fade-in-up">{children}</div>}
     </div>
   );
 }

@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TechLaser Controller — ОПУ Management System",
-  description: "Professional OPU (Optical Positioning Unit) control system for TechLaser devices. Manage TL.0009, TL.0250, TL.0320, TL.0400.",
+  title: "SaaS Controller — ОПУ Management System",
+  description: "Professional OPU (Optical Positioning Unit) control system. Manage TL.0009, TL.0250, TL.0320, TL.0400.",
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
@@ -29,7 +29,7 @@ export default function RootLayout({
   return (
     <html lang="ru" className="dark" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground font-mono scanline-effect`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground font-mono`}
       >
         {children}
         <Toaster />
