@@ -2,12 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { useDeviceStore } from '@/store/device-store';
 import { PROTOCOL_COMMANDS } from '@/lib/device-types';
 import { Play, Square, Waves } from 'lucide-react';
+import RotaryEncoder from './RotaryEncoder';
 
 async function sendCommand(device: string, command: string, value?: string) {
   const res = await fetch('/api/command', {
@@ -138,11 +137,6 @@ export default function SwingControl() {
     setSwing({ enabled: false });
   };
 
-  const updateField = (field: string, val: string) => {
-    const num = parseFloat(val) || 0;
-    setSwing({ [field]: num });
-  };
-
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-2">
@@ -167,31 +161,13 @@ export default function SwingControl() {
           isRunning={swing.enabled}
         />
 
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Нач. АЗ (°)</Label>
-            <Input type="number" step="0.1" value={swing.startAz} onChange={(e) => updateField('startAz', e.target.value)} className="font-mono text-sm h-8" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Кон. АЗ (°)</Label>
-            <Input type="number" step="0.1" value={swing.endAz} onChange={(e) => updateField('endAz', e.target.value)} className="font-mono text-sm h-8" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Нач. УМ (°)</Label>
-            <Input type="number" step="0.1" value={swing.startEl} onChange={(e) => updateField('startEl', e.target.value)} className="font-mono text-sm h-8" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Кон. УМ (°)</Label>
-            <Input type="number" step="0.1" value={swing.endEl} onChange={(e) => updateField('endEl', e.target.value)} className="font-mono text-sm h-8" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Скорость</Label>
-            <Input type="number" min={1} max={10} value={swing.speed} onChange={(e) => updateField('speed', e.target.value)} className="font-mono text-sm h-8" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Циклы (0=∞)</Label>
-            <Input type="number" min={0} value={swing.cycleCount} onChange={(e) => updateField('cycleCount', e.target.value)} className="font-mono text-sm h-8" />
-          </div>
+        <div className="grid grid-cols-3 gap-2 items-end justify-items-center">
+          <RotaryEncoder value={swing.startAz} onChange={(v) => setSwing({ startAz: v })} min={-180} max={180} step={1} decimals={1} label="Нач. АЗ" unit="°" size="sm" />
+          <RotaryEncoder value={swing.endAz} onChange={(v) => setSwing({ endAz: v })} min={-180} max={180} step={1} decimals={1} label="Кон. АЗ" unit="°" size="sm" />
+          <RotaryEncoder value={swing.startEl} onChange={(v) => setSwing({ startEl: v })} min={-90} max={90} step={1} decimals={1} label="Нач. УМ" unit="°" size="sm" />
+          <RotaryEncoder value={swing.endEl} onChange={(v) => setSwing({ endEl: v })} min={-90} max={90} step={1} decimals={1} label="Кон. УМ" unit="°" size="sm" />
+          <RotaryEncoder value={swing.speed} onChange={(v) => setSwing({ speed: v })} min={1} max={10} step={1} decimals={0} label="Скорость" unit="" size="sm" />
+          <RotaryEncoder value={swing.cycleCount} onChange={(v) => setSwing({ cycleCount: v })} min={0} max={999} step={1} decimals={0} label="Циклы" unit="" size="sm" />
         </div>
 
         <div className="flex gap-2 pt-1">

@@ -1,13 +1,12 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { useDeviceStore } from '@/store/device-store';
 import { PROTOCOL_COMMANDS } from '@/lib/device-types';
 import { Crosshair, Home, Navigation } from 'lucide-react';
+import RotaryEncoder from './RotaryEncoder';
 
 async function sendCommand(device: string, command: string, value?: string) {
   const res = await fetch('/api/command', {
@@ -110,9 +109,14 @@ function RadarVisualization({ azimuth, elevation, targetAz, targetEl }: {
 export default function PositionControl() {
   const { activeDevice, telemetry, targetAzimuth, targetElevation, setTargetAzimuth, setTargetElevation, connectionStatus } = useDeviceStore();
   const isConnected = connectionStatus === 'connected';
-
+  const [mounted, setMounted] = useState(false);
   const targetAzNum = useMemo(() => parseFloat(targetAzimuth) || 0, [targetAzimuth]);
   const targetElNum = useMemo(() => parseFloat(targetElevation) || 0, [targetElevation]);
+
+  useEffect(() => {
+    const id = setTimeout(() => setMounted(true), 0);
+    return () => clearTimeout(id);
+  }, []);
 
   const handleGoTo = () => {
     sendCommand(activeDevice, PROTOCOL_COMMANDS.GOTO_POSITION, `${targetAzNum},${targetElNum}`);
@@ -133,14 +137,16 @@ export default function PositionControl() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {/* Radar visualization */}
+        {/* Radar visualization — only render on client to avoid hydration mismatch from trig */}
         <div className="relative w-full aspect-square max-w-[220px] mx-auto">
-          <RadarVisualization
-            azimuth={telemetry.azimuth}
-            elevation={telemetry.elevation}
-            targetAz={hasTarget ? targetAzNum : null}
-            targetEl={hasTarget ? targetElNum : null}
-          />
+          {mounted && (
+            <RadarVisualization
+              azimuth={telemetry.azimuth}
+              elevation={telemetry.elevation}
+              targetAz={hasTarget ? targetAzNum : null}
+              targetEl={hasTarget ? targetElNum : null}
+            />
+          )}
           {/* Overlay: current values */}
           <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-center">
             <div className="text-[9px] text-muted-foreground font-mono">
@@ -149,26 +155,20 @@ export default function PositionControl() {
           </div>
         </div>
 
-        {/* Target inputs */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">Целевой АЗ (°)</Label>
-            <Input
-              type="number" step="0.1" value={targetAzimuth}
-              onChange={(e) => setTargetAzimuth(e.target.value)}
-              className="font-mono text-sm h-8"
-              placeholder="0.0"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">Целевой УМ (°)</Label>
-            <Input
-              type="number" step="0.1" value={targetElevation}
-              onChange={(e) => setTargetElevation(e.target.value)}
-              className="font-mono text-sm h-8"
-              placeholder="0.0"
-            />
-          </div>
+        {/* Target inputs — rotary encoders */}
+        <div className="flex items-center justify-center gap-6">
+          <RotaryEncoder
+            value={targetAzNum}
+            onChange={(v) => setTargetAzimuth(String(v))}
+            min={-180} max={180} step={0.1} decimals={1}
+            label="Целевой АЗ" unit="°" size="md"
+          />
+          <RotaryEncoder
+            value={targetElNum}
+            onChange={(v) => setTargetElevation(String(v))}
+            min={-90} max={90} step={0.1} decimals={1}
+            label="Целевой УМ" unit="°" size="md"
+          />
         </div>
 
         <div className="flex gap-2">
