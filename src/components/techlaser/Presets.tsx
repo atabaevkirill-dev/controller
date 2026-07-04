@@ -144,7 +144,7 @@ export default function Presets() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-8 gap-1">
           {slots.map((preset, idx) => (
             <div
               key={idx}
@@ -156,38 +156,33 @@ export default function Presets() {
             >
               <button
                 className={`
-                  w-full aspect-square rounded-md border border-border p-1.5
-                  flex flex-col items-center justify-center gap-0.5
+                  w-full rounded border border-border py-1.5 px-0.5
+                  flex flex-col items-center justify-center gap-0
                   transition-colors hover:border-primary/50 hover:bg-secondary/50
                   ${preset ? 'bg-secondary/30' : 'bg-secondary/10'}
                 `}
                 onClick={() => recallPreset(idx)}
-                title={preset ? `Вызвать: ${preset.name}` : `Пустой слот ${idx + 1}\nДолгое нажатие — сохранить\nПКМ — очистить`}
+                title={preset ? `${preset.name} (${preset.azimuth.toFixed(0)}°/${preset.elevation.toFixed(0)}°)\nДолгое нажатие — сохранить\nПКМ — очистить` : `Слот ${idx + 1} — пустой`}
               >
-                <span className="text-[10px] text-muted-foreground font-mono">#{idx + 1}</span>
+                <span className="text-[9px] text-muted-foreground font-mono leading-none">{idx + 1}</span>
                 {editingSlot === idx ? (
                   <Input
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
                     onBlur={saveName}
                     onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingSlot(null); }}
-                    className="h-5 text-[9px] p-0 px-0.5 font-mono text-center bg-input border-primary"
+                    className="h-4 text-[8px] p-0 px-0.5 font-mono text-center bg-input border-primary mt-0.5"
                     autoFocus
                     onClick={(e) => e.stopPropagation()}
                     onPointerDown={(e) => e.stopPropagation()}
                   />
                 ) : (
                   <span
-                    className="text-[10px] font-medium leading-tight text-center truncate max-w-full cursor-text"
+                    className="text-[9px] font-medium leading-tight text-center truncate w-full cursor-text mt-0.5"
                     onClick={(e) => { e.stopPropagation(); startEdit(idx); }}
-                    title="Кликните для редактирования имени"
+                    title="Редактировать имя"
                   >
                     {preset?.name || '—'}
-                  </span>
-                )}
-                {preset && (
-                  <span className="text-[8px] font-mono text-muted-foreground">
-                    {preset.azimuth.toFixed(0)}° / {preset.elevation.toFixed(0)}°
                   </span>
                 )}
               </button>
@@ -214,8 +209,8 @@ export default function Presets() {
             </div>
           ))}
         </div>
-        <p className="text-[10px] text-muted-foreground mt-2 text-center">
-          Клик — вызвать • Долгое нажатие — сохранить • ПКМ — очистить
+        <p className="text-[9px] text-muted-foreground mt-1.5 text-center">
+          Клик — вызвать · Удержание — сохранить · ПКМ — очистить
         </p>
       </CardContent>
     </Card>

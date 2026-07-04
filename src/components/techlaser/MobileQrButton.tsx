@@ -3,14 +3,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
-import { Smartphone, Copy, Check, QrCode, Loader2 } from 'lucide-react';
+import { Copy, Check, QrCode, Loader2, Smartphone } from 'lucide-react';
 
 export default function MobileQrButton() {
   const [open, setOpen] = useState(false);
@@ -29,13 +27,11 @@ export default function MobileQrButton() {
       });
   }, []);
 
-  // Fetch URL when dialog opens (use ref to avoid re-fetching)
   useEffect(() => {
     if (open && !fetchedRef.current) {
       fetchedRef.current = true;
       fetchUrl();
     }
-    // Reset when closed so next open re-fetches
     if (!open) {
       fetchedRef.current = false;
     }
@@ -50,11 +46,9 @@ export default function MobileQrButton() {
     } catch {}
   };
 
-  const loading = open && !mobileUrl;
-
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <Button
           size="sm"
           variant="outline"
@@ -63,74 +57,66 @@ export default function MobileQrButton() {
           <QrCode className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Телефон</span>
         </Button>
-      </DialogTrigger>
+      </PopoverTrigger>
 
-      <DialogContent className="sm:max-w-[340px] p-0 gap-0 overflow-hidden">
-        {/* Top accent bar */}
-        <div className="h-1 bg-primary w-full shrink-0" />
+      <PopoverContent
+        className="w-72 p-4 space-y-3"
+        side="bottom"
+        align="end"
+        sideOffset={8}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2">
+          <Smartphone className="w-4 h-4 text-primary shrink-0" />
+          <span className="text-sm font-semibold">Управление с телефона</span>
+        </div>
 
-        <div className="px-6 pt-5 pb-6 flex flex-col items-center gap-4">
-          <DialogHeader className="text-center space-y-0">
-            <DialogTitle className="flex items-center justify-center gap-2 text-sm font-semibold">
-              <Smartphone className="w-4 h-4 text-primary" />
-              Управление с телефона
-            </DialogTitle>
-          </DialogHeader>
-
-          {/* QR Code */}
-          {loading ? (
-            <div className="w-[200px] h-[200px] rounded-2xl bg-secondary flex items-center justify-center">
-              <Loader2 className="w-6 h-6 text-muted-foreground animate-spin" />
+        {/* QR Code */}
+        <div className="flex justify-center">
+          {!mobileUrl ? (
+            <div className="w-[180px] h-[180px] rounded-xl bg-secondary flex items-center justify-center">
+              <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
             </div>
-          ) : mobileUrl ? (
-            <div className="relative p-3 bg-white rounded-2xl shadow-lg">
+          ) : (
+            <div className="p-2.5 bg-white rounded-xl shadow-md">
               <QRCodeSVG
                 value={mobileUrl}
-                size={200}
+                size={180}
                 level="M"
                 bgColor="#ffffff"
                 fgColor="#0a0a0a"
                 includeMargin={false}
               />
             </div>
-          ) : (
-            <div className="w-[200px] h-[200px] rounded-2xl bg-secondary flex items-center justify-center text-xs text-muted-foreground">
-              Ошибка загрузки
-            </div>
-          )}
-
-          {/* Instructions */}
-          <div className="text-center space-y-1">
-            <p className="text-xs text-foreground font-medium">
-              Наведите камеру телефона на QR-код
-            </p>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Откроется страница с D-Pad и скоростью
-            </p>
-          </div>
-
-          {/* URL + Copy */}
-          {mobileUrl && (
-            <div className="w-full flex items-center gap-2 bg-secondary/80 rounded-lg p-1.5">
-              <code className="flex-1 text-[11px] font-mono text-muted-foreground truncate px-2">
-                {mobileUrl}
-              </code>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 px-2 shrink-0"
-                onClick={handleCopy}
-              >
-                {copied ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-              </Button>
-            </div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+
+        {/* Instructions */}
+        <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
+          Наведите камеру на QR-код — откроется страница с D-Pad
+        </p>
+
+        {/* URL + Copy */}
+        {mobileUrl && (
+          <div className="flex items-center gap-1.5 bg-secondary/80 rounded-md px-2 py-1">
+            <code className="flex-1 text-[10px] font-mono text-muted-foreground truncate">
+              {mobileUrl}
+            </code>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 w-6 p-0 shrink-0"
+              onClick={handleCopy}
+            >
+              {copied ? (
+                <Check className="w-3 h-3 text-emerald-400" />
+              ) : (
+                <Copy className="w-3 h-3" />
+              )}
+            </Button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }

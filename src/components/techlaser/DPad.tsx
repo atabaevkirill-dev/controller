@@ -52,8 +52,8 @@ export default function DPad() {
   return (
     <div className="flex flex-col items-center gap-3">
       <div
-        className="grid grid-cols-3 grid-rows-3 gap-1.5 relative"
-        style={{ width: 'clamp(180px, 30vw, 220px)', height: 'clamp(180px, 30vw, 220px)' }}
+        className="grid grid-cols-3 grid-rows-3 gap-2 relative w-full"
+        style={{ maxWidth: '280px', height: 'clamp(220px, 25vw, 280px)' }}
       >
         {/* Connection ring glow behind the DPad */}
         {isConnected && (

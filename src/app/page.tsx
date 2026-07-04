@@ -264,7 +264,7 @@ export default function TechLaserController() {
             </MobileExpandableSection>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
             {/* Left Column — Controls */}
             <div className="space-y-4">
               <Card className="bg-card border-border">
