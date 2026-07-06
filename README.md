@@ -77,6 +77,26 @@ npm run build
 npm run start
 ```
 
+### Автозапуск через systemd (рекомендуется)
+
+Для автоматического запуска при загрузке системы:
+
+```bash
+# Сервис уже настроен и включён
+sudo systemctl status controller.service
+
+# Управление сервисом
+sudo systemctl start controller.service    # Запустить
+sudo systemctl stop controller.service     # Остановить
+sudo systemctl restart controller.service  # Перезапустить
+sudo systemctl enable controller.service   # Включить автозапуск
+sudo systemctl disable controller.service  # Отключить автозапуск
+
+# Просмотр логов
+sudo journalctl -u controller.service -f        # В реальном времени
+sudo journalctl -u controller.service -n 100    # Последние 100 строк
+```
+
 ## 📁 Структура проекта
 
 ```
