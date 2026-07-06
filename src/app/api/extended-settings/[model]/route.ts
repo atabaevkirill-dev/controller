@@ -7,8 +7,28 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ model: string }> }
 ) {
+  const { model } = await params;
+  
   try {
-    const { model } = await params;
+    // First ensure device exists (create if not)
+    const defaults = DEFAULT_DEVICE_CONFIGS[model as keyof typeof DEFAULT_DEVICE_CONFIGS];
+    if (!defaults) {
+      return NextResponse.json({ success: false, error: `Unknown model: ${model}` }, { status: 400 });
+    }
+
+    await db.deviceConfig.upsert({
+      where: { model },
+      create: {
+        model,
+        displayName: defaults.name,
+        tiltIp: defaults.config.tiltIp,
+        tiltPort: defaults.config.tiltPort,
+        panIp: defaults.config.panIp,
+        panPort: defaults.config.panPort,
+        isActive: false,
+      },
+      update: {},
+    });
 
     let settings = await db.extendedSettings.findUnique({
       where: { model },
@@ -16,49 +36,49 @@ export async function GET(
 
     // Seed with defaults if not exists
     if (!settings) {
-      const defaults = DEFAULT_EXTENDED_SETTINGS[model as DeviceModel];
-      if (!defaults) {
+      const extDefaults = DEFAULT_EXTENDED_SETTINGS[model as DeviceModel];
+      if (!extDefaults) {
         return NextResponse.json({ success: false, error: `Unknown model: ${model}` }, { status: 400 });
       }
 
       settings = await db.extendedSettings.create({
         data: {
           model,
-          speedMode: defaults.speedMode,
-          acceleration: defaults.acceleration,
-          deceleration: defaults.deceleration,
-          deadZone: defaults.deadZone,
-          azMin: defaults.azMin,
-          azMax: defaults.azMax,
-          elMin: defaults.elMin,
-          elMax: defaults.elMax,
-          autoParkTimeout: defaults.autoParkTimeout,
-          backlashComp: defaults.backlashComp,
+          speedMode: extDefaults.speedMode,
+          acceleration: extDefaults.acceleration,
+          deceleration: extDefaults.deceleration,
+          deadZone: extDefaults.deadZone,
+          azMin: extDefaults.azMin,
+          azMax: extDefaults.azMax,
+          elMin: extDefaults.elMin,
+          elMax: extDefaults.elMax,
+          autoParkTimeout: extDefaults.autoParkTimeout,
+          backlashComp: extDefaults.backlashComp,
           // Mid+ fields
-          tempWarning: 'tempWarning' in defaults ? defaults.tempWarning : null,
-          tempShutdown: 'tempShutdown' in defaults ? defaults.tempShutdown : null,
-          errorRecovery: 'errorRecovery' in defaults ? (defaults as any).errorRecovery : null,
-          posReportInterval: 'positionReportInterval' in defaults ? (defaults as any).positionReportInterval : null,
+          tempWarning: 'tempWarning' in extDefaults ? extDefaults.tempWarning : null,
+          tempShutdown: 'tempShutdown' in extDefaults ? extDefaults.tempShutdown : null,
+          errorRecovery: 'errorRecovery' in extDefaults ? (extDefaults as any).errorRecovery : null,
+          posReportInterval: 'positionReportInterval' in extDefaults ? (extDefaults as any).positionReportInterval : null,
           // Advanced fields
-          velocityFeedback: 'velocityFeedback' in defaults ? (defaults as any).velocityFeedback : null,
-          inertialDamping: 'inertialDamping' in defaults ? (defaults as any).inertialDamping : null,
-          motorCurrentLimit: 'motorCurrentLimit' in defaults ? (defaults as any).motorCurrentLimit : null,
+          velocityFeedback: 'velocityFeedback' in extDefaults ? (extDefaults as any).velocityFeedback : null,
+          inertialDamping: 'inertialDamping' in extDefaults ? (extDefaults as any).inertialDamping : null,
+          motorCurrentLimit: 'motorCurrentLimit' in extDefaults ? (extDefaults as any).motorCurrentLimit : null,
           // Dual axis
-          tiltSpeedMode: 'tiltSpeedMode' in defaults ? (defaults as any).tiltSpeedMode : null,
-          panSpeedMode: 'panSpeedMode' in defaults ? (defaults as any).panSpeedMode : null,
-          tiltAcceleration: 'tiltAcceleration' in defaults ? (defaults as any).tiltAcceleration : null,
-          panAcceleration: 'panAcceleration' in defaults ? (defaults as any).panAcceleration : null,
-          tiltDeceleration: 'tiltDeceleration' in defaults ? (defaults as any).tiltDeceleration : null,
-          panDeceleration: 'panDeceleration' in defaults ? (defaults as any).panDeceleration : null,
-          syncMode: 'syncMode' in defaults ? (defaults as any).syncMode : null,
-          syncRatio: 'syncRatio' in defaults ? (defaults as any).syncRatio : null,
+          tiltSpeedMode: 'tiltSpeedMode' in extDefaults ? (extDefaults as any).tiltSpeedMode : null,
+          panSpeedMode: 'panSpeedMode' in extDefaults ? (extDefaults as any).panSpeedMode : null,
+          tiltAcceleration: 'tiltAcceleration' in extDefaults ? (extDefaults as any).tiltAcceleration : null,
+          panAcceleration: 'panAcceleration' in extDefaults ? (extDefaults as any).panAcceleration : null,
+          tiltDeceleration: 'tiltDeceleration' in extDefaults ? (extDefaults as any).tiltDeceleration : null,
+          panDeceleration: 'panDeceleration' in extDefaults ? (extDefaults as any).panDeceleration : null,
+          syncMode: 'syncMode' in extDefaults ? (extDefaults as any).syncMode : null,
+          syncRatio: 'syncRatio' in extDefaults ? (extDefaults as any).syncRatio : null,
         },
       });
     }
 
     return NextResponse.json({ success: true, data: settings });
   } catch (error: any) {
-    console.error(`[API /extended-settings/${params} GET]`, error);
+    console.error(`[API /extended-settings/${model} GET]`, error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
@@ -100,7 +120,7 @@ export async function PUT(
 
     return NextResponse.json({ success: true, data: settings });
   } catch (error: any) {
-    console.error(`[API /extended-settings/${params} PUT]`, error);
+    console.error(`[API /extended-settings/${model} PUT]`, error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
@@ -110,8 +130,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ model: string }> }
 ) {
+  const { model } = await params;
+  
   try {
-    const { model } = await params;
     const body = await request.json();
     const { command, value } = body;
 
@@ -131,7 +152,7 @@ export async function POST(
 
     return NextResponse.json({ success, data: response, error: success ? undefined : response });
   } catch (error: any) {
-    console.error(`[API /extended-settings/${params} POST]`, error);
+    console.error(`[API /extended-settings/${model} POST]`, error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

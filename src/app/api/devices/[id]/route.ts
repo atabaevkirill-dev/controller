@@ -6,9 +6,9 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  
   try {
-    const { id } = await params;
-
     const device = await db.deviceConfig.findUnique({
       where: { model: id },
       include: { presets: { orderBy: { slot: 'asc' } } },
@@ -35,14 +35,27 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  
   try {
-    const { id } = await params;
     const body = await request.json();
     const { displayName, tiltIp, tiltPort, panIp, panPort, isActive } = body;
 
-    const device = await db.deviceConfig.update({
+    // Get default config if device doesn't exist yet
+    const defaults = DEFAULT_DEVICE_CONFIGS[id as keyof typeof DEFAULT_DEVICE_CONFIGS];
+
+    const device = await db.deviceConfig.upsert({
       where: { model: id },
-      data: {
+      create: {
+        model: id,
+        displayName: displayName || (defaults?.name || id),
+        tiltIp: tiltIp || (defaults?.config.tiltIp || '127.0.0.1'),
+        tiltPort: tiltPort || (defaults?.config.tiltPort || 5000),
+        panIp: panIp || (defaults?.config.panIp || '127.0.0.1'),
+        panPort: panPort || (defaults?.config.panPort || 5001),
+        isActive: isActive !== undefined ? isActive : false,
+      },
+      update: {
         ...(displayName !== undefined && { displayName }),
         ...(tiltIp !== undefined && { tiltIp }),
         ...(tiltPort !== undefined && { tiltPort }),
@@ -55,12 +68,6 @@ export async function PUT(
     return NextResponse.json({ success: true, data: device });
   } catch (error: any) {
     console.error(`[API /devices/${id} PUT]`, error);
-    if (error.code === 'P2025') {
-      return NextResponse.json(
-        { success: false, error: `Device '${id}' not found` },
-        { status: 404 }
-      );
-    }
     return NextResponse.json(
       { success: false, error: error.message || 'Failed to update device' },
       { status: 500 }
@@ -72,8 +79,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  
   try {
-    const { id } = await params;
     const defaults = DEFAULT_DEVICE_CONFIGS[id as keyof typeof DEFAULT_DEVICE_CONFIGS];
 
     if (!defaults) {
